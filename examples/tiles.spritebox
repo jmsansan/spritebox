@@ -1,0 +1,141 @@
+; A tileset with two autotiled terrains, and a level drawn with it.
+
+palette ground
+  .  transparent
+  k  #1a1c2c   ; ink
+  G  #a7f070   ; grass
+  g  #38b764
+  d  #b86f50   ; dirt
+  D  #7a4841
+  s  #94b0c2   ; stone
+  S  #566c86
+  r  #b13e53   ; brick
+  R  #5d275d
+  w  #f4f4f4
+
+sprite spike 8x8 palette=ground
+  ........
+  ...k....
+  ..kwk...
+  ..kSk.k.
+  .kSSSkwk
+  .kSSSkSk
+  kSSSSSSk
+  kkkkkkkk
+
+tileset ground 8x8 palette=ground columns=8
+  ; Five pieces; spritebox builds the 47 variants from their quarters.
+  terrain dirt 47
+    island
+      .kkkkkk.
+      kGGGGGGk
+      kggggggk
+      kddddddk
+      kddDdddk
+      kdddddDk
+      kddddddk
+      .kkkkkk.
+    h_strip
+      kkkkkkkk
+      GGGGGGGG
+      gggggggg
+      dddddddd
+      ddDddddD
+      dddddDdd
+      dddddddd
+      kkkkkkkk
+    v_strip
+      kddddddk
+      kddDdddk
+      kddddddk
+      kdddddDk
+      kddddddk
+      kdDddddk
+      kddddddk
+      kddddddk
+    inner
+      kddddddk
+      dddDdddd
+      dddddDdd
+      dddddddd
+      dDdddddd
+      ddddDddd
+      dddddddd
+      kddddddk
+    fill
+      dddddddd
+      ddDddddd
+      dddddDdd
+      dddddddd
+      dDdddddd
+      ddddDddd
+      dddddddd
+      dddDdddd
+  ; Four pieces make the 16 variants of the edge scheme.
+  terrain stone 16
+    island
+      .kkkkkk.
+      kssssssk
+      ksSsssSk
+      ksssssSk
+      ksssssSk
+      ksSSsSSk
+      kSSSSSSk
+      .kkkkkk.
+    h_strip
+      kkkkkkkk
+      ssssssss
+      sSssssSs
+      ssssssSs
+      ssssssSs
+      sSSSsSSS
+      SSSSSSSS
+      kkkkkkkk
+    v_strip
+      kssssssk
+      ksSsssSk
+      ksssssSk
+      ksssssSk
+      ksSSsSSk
+      kSSSSSSk
+      kssssssk
+      ksSsssSk
+    fill
+      ssssssss
+      sSssssSs
+      ssssssSs
+      ssssssSs
+      sSSSsSSS
+      SSSSSSSS
+      ssssssss
+      sSssssSs
+  tile brick
+    rrrRrrrR
+    RRRRRRRR
+    rRrrrRrr
+    RRRRRRRR
+    rrrRrrrR
+    RRRRRRRR
+    rRrrrRrr
+    RRRRRRRR
+  tile spikes = spike
+  tile spikes_down = spike:flip_y
+
+tilemap level tileset=ground
+  legend
+    .  empty
+    #  dirt   solid
+    =  stone  solid
+    b  brick  solid
+    ^  spikes
+    v  spikes_down
+  map
+    ................................
+    ..........bbbb..................
+    ..........vvvv.......==.........
+    .....................==.........
+    ...###..........###..==.........
+    ...###...^^^....####.====.......
+    ####################.....###.###
+    ########.###########^^^^^#######
+    ################################

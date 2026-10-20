@@ -4,6 +4,7 @@ use spritebox::{Color, Document, Image, PreviewOptions, png};
 
 const COIN: &str = include_str!("../examples/coin.spritebox");
 const SHOWCASE: &str = include_str!("../examples/showcase.spritebox");
+const TILES: &str = include_str!("../examples/tiles.spritebox");
 
 /// FNV-1a of the image's size and RGBA bytes.
 fn checksum(image: &Image) -> u64 {
@@ -171,5 +172,26 @@ fn golden_showcase() {
         0xe378_7ca4_e44a_770c,
         "{:#018x}",
         checksum(&sheet)
+    );
+}
+
+#[test]
+fn golden_tiles() {
+    let doc: Document = TILES.parse().unwrap();
+    let tileset = doc.tileset("ground").unwrap();
+    let map = doc.tilemap("level").unwrap();
+    let sums = [
+        checksum(&tileset.render()),
+        checksum(&map.render(tileset).unwrap()),
+        checksum(&doc.preview(&PreviewOptions::default()).unwrap()),
+    ];
+    assert_eq!(
+        sums,
+        [
+            0xab9c_431d_e5ce_847b,
+            0xe2cf_f3a4_a5b4_7251,
+            0x80d6_236f_6e83_83fd
+        ],
+        "{sums:#018x?}"
     );
 }

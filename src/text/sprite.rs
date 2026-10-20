@@ -96,7 +96,7 @@ impl<'a> Parser<'a, '_> {
         if !layered {
             let (rows, ok) = self.rows(
                 node,
-                size_token,
+                size_token.pos,
                 width,
                 height,
                 &format!("sprite `{}`", name.text),
@@ -108,7 +108,7 @@ impl<'a> Parser<'a, '_> {
             });
         }
         for child in node.children.iter().filter(|_| layered) {
-            match self.layer(child, size_token, width, height) {
+            match self.layer(child, width, height) {
                 Ok((layer, ok)) => {
                     complete &= ok;
                     let named = layer.name.map(|t| t.text);
@@ -181,13 +181,7 @@ impl<'a> Parser<'a, '_> {
     }
 
     /// One `layer NAME` with rows under it, or `layer NAME = CHAIN`.
-    fn layer(
-        &mut self,
-        node: &Node<'a>,
-        size_token: Token,
-        width: u32,
-        height: u32,
-    ) -> Parsed<(LayerDef<'a>, bool)> {
+    fn layer(&mut self, node: &Node<'a>, width: u32, height: u32) -> Parsed<(LayerDef<'a>, bool)> {
         let tokens = &node.line.tokens;
         if tokens[0].text != "layer" || tokens.len() < 2 {
             return Err(tokens[0].error(
@@ -227,7 +221,7 @@ impl<'a> Parser<'a, '_> {
         }
         let (rows, ok) = self.rows(
             node,
-            size_token,
+            name.end(),
             width,
             height,
             &format!("layer `{}`", name.text),
@@ -241,12 +235,12 @@ impl<'a> Parser<'a, '_> {
         ))
     }
 
-    /// The rows under `node`, checked against the size. Returns the rows of the
-    /// right width, and whether all were right.
-    fn rows(
+    /// The rows under `node`, checked against the size; too few rows are reported at
+    /// `missing_at`. Returns the rows of the right width, and whether all were right.
+    pub(super) fn rows(
         &mut self,
         node: &Node<'a>,
-        size_token: Token,
+        missing_at: Position,
         width: u32,
         height: u32,
         what: &str,
@@ -288,8 +282,7 @@ impl<'a> Parser<'a, '_> {
         if written != height as usize {
             let pos = match node.children.get(height as usize) {
                 Some(extra) => extra.line.first().pos,
-                None if node.line.first().text == "layer" => node.line.tokens[1].end(),
-                None => size_token.pos,
+                None => missing_at,
             };
             self.errors.push(Error::at(
                 pos,
@@ -510,7 +503,7 @@ impl<'a> Parser<'a, '_> {
         Some(depth)
     }
 
-    fn sprite_palette<'p>(
+    pub(super) fn sprite_palette<'p>(
         &mut self,
         name: Token,
         palette: Option<Token>,
@@ -544,7 +537,7 @@ impl<'a> Parser<'a, '_> {
 
     /// The keys of `rows`, or `None` after reporting the first unknown key of each
     /// row.
-    fn keys(&mut self, rows: &[Token], palette: &Palette) -> Option<Vec<char>> {
+    pub(super) fn keys(&mut self, rows: &[Token], palette: &Palette) -> Option<Vec<char>> {
         let lookup = crate::sprite::ColorLookup::new(palette);
         let mut keys = Vec::with_capacity(rows.iter().map(|r| r.text.len()).sum());
         let mut ok = true;

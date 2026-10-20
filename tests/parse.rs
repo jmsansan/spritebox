@@ -293,9 +293,16 @@ fn limits() {
 #[test]
 fn never_panics_on_malformed_text() {
     let base = format!(
-        "{DAWN}\nsprite coin 4x2 palette=dawn\n  layer a\n    .ko.\n    kook\n  layer b = c:pad(1)\n\
-         sprite c = coin:rot90:offset(1,-1):swap(dawn):outline(k)\nanimation x once\n  c:flip_x 6\n"
+        "{DAWN}\nsprite dot 2x2 palette=dawn\n  ko\n  ok\nsprite wide 4x2 palette=dawn\n  kkoo\n  ookk\n\
+         sprite coin 4x2 palette=dawn\n  layer a\n    .ko.\n    kook\n  layer b = wide:flip_y\n\
+         sprite c = coin:rot90:offset(1,-1):swap(dawn):outline(k)\nanimation x once\n  c:flip_x 6\n\
+         tileset t 2x2 palette=dawn columns=3\n  tile a\n    ko\n    ok\n  tile b = dot:flip_x\n\
+         \x20 terrain d 16\n    island = dot\n    h_strip\n      kk\n      oo\n    v_strip = dot:rot90\n\
+         \x20   fill = dot\ntilemap m outside=empty\n  legend\n    . empty\n    # d solid\n    a a\n\
+         \x20 map\n    .#a\n    ##.\n"
     );
+    let base_errors = check(&base, &Limits::default());
+    assert!(base_errors.is_empty(), "{base_errors:?}");
     let fragments = [
         "",
         " ",
@@ -597,4 +604,51 @@ fn animation_errors() {
     };
     let three = field("animation a\n  s 1\n  s 1\n  s 1\n");
     assert_eq!(errors_with(&three, &limits), vec![(17, 3, LimitExceeded)]);
+}
+
+#[test]
+fn random_edits_never_panic() {
+    let examples = [
+        include_str!("../examples/coin.spritebox"),
+        include_str!("../examples/showcase.spritebox"),
+        include_str!("../examples/tiles.spritebox"),
+    ];
+    let alphabet: Vec<char> = " \n\t.#kKo=:;(),-_x0123456789abcdefgélsupwy"
+        .chars()
+        .collect();
+    let mut state = 0x2545_f491_4f6c_dd1du64;
+    let mut next = |n: usize| {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        (state % n as u64) as usize
+    };
+    for example in examples {
+        let original: Vec<char> = example.chars().collect();
+        for _ in 0..400 {
+            let mut text = original.clone();
+            for _ in 0..1 + next(4) {
+                let at = next(text.len());
+                match next(4) {
+                    0 => {
+                        text.remove(at);
+                    }
+                    1 => text.insert(at, alphabet[next(alphabet.len())]),
+                    2 => text[at] = alphabet[next(alphabet.len())],
+                    _ => {
+                        // Move a slice of text elsewhere.
+                        let len = 1 + next(40).min(text.len() - at - 1);
+                        let piece: Vec<char> = text.drain(at..at + len).collect();
+                        let to = next(text.len() + 1);
+                        text.splice(to..to, piece);
+                    }
+                }
+            }
+            let text: String = text.into_iter().collect();
+            if let Ok(doc) = Document::parse(&text) {
+                let _ = doc.preview(&spritebox::PreviewOptions::default());
+                let _ = doc.export(&spritebox::ExportOptions::default());
+            }
+        }
+    }
 }

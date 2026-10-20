@@ -1,6 +1,9 @@
 use std::str::FromStr;
 
-use crate::{Atlas, AtlasOptions, Error, Image, Limits, Palette, PreviewOptions, Result, Sprite};
+use crate::{
+    Atlas, AtlasOptions, Error, Export, ExportOptions, Image, Limits, Palette, PreviewOptions,
+    Result, Sprite, Tilemap, Tileset,
+};
 
 /// An animation: frames shown in order, each for a number of ticks.
 ///
@@ -76,6 +79,8 @@ pub struct Document {
     pub(crate) sprites: Vec<Sprite>,
     pub(crate) frame_sprites: Vec<Sprite>,
     pub(crate) animations: Vec<Animation>,
+    pub(crate) tilesets: Vec<Tileset>,
+    pub(crate) tilemaps: Vec<Tilemap>,
 }
 
 impl Document {
@@ -125,6 +130,20 @@ impl Document {
     pub fn animation(&self, name: &str) -> Option<&Animation> {
         self.animations.iter().find(|a| a.name == name)
     }
+    /// The tilesets, in the order they are defined.
+    pub fn tilesets(&self) -> &[Tileset] {
+        &self.tilesets
+    }
+    pub fn tileset(&self, name: &str) -> Option<&Tileset> {
+        self.tilesets.iter().find(|t| t.name == name)
+    }
+    /// The tilemaps, in the order they are defined.
+    pub fn tilemaps(&self) -> &[Tilemap] {
+        &self.tilemaps
+    }
+    pub fn tilemap(&self, name: &str) -> Option<&Tilemap> {
+        self.tilemaps.iter().find(|t| t.name == name)
+    }
 
     /// Packs every sprite, and every sprite that animation frames build, into one
     /// texture, within the default [`Limits`]. The [`Atlas`] has the rectangle of each
@@ -136,6 +155,17 @@ impl Document {
     /// [`Document::atlas`] within `limits`, which bound the texture's size.
     pub fn atlas_with(&self, options: &AtlasOptions, limits: &Limits) -> Result<Atlas> {
         crate::atlas::build(self, options, limits)
+    }
+
+    /// Everything a game needs: the atlas, each tileset's texture, the tilemaps, and
+    /// their metadata, within the default [`Limits`].
+    pub fn export(&self, options: &ExportOptions) -> Result<Export> {
+        self.export_with(options, &Limits::default())
+    }
+
+    /// [`Document::export`] within `limits`.
+    pub fn export_with(&self, options: &ExportOptions, limits: &Limits) -> Result<Export> {
+        crate::export::build(self, options, limits)
     }
 
     /// Draws a preview sheet: every definition, scaled up, on a grid and labelled with

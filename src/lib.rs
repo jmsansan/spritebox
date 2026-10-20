@@ -1,9 +1,9 @@
 //! 2D pixel art as plain text, in safe Rust with zero dependencies.
 //!
-//! A spritebox file defines palettes, sprites and animations as text that a person or an AI
-//! assistant can write, read and diff. The crate validates it with exact
-//! diagnostics, renders it to RGBA8 images and PNG files, and draws preview sheets to
-//! review a whole file at a glance. The same text gives the same pixels on every
+//! A spritebox file defines palettes, sprites, animations, tilesets and tilemaps as
+//! text that a person or an AI assistant can write, read and diff. The crate
+//! validates it with exact diagnostics, renders it to RGBA8 images and PNG files, and
+//! draws preview sheets to review a whole file at a glance. The same text gives the same pixels on every
 //! platform.
 //!
 //! ```
@@ -99,6 +99,36 @@
 //! One frame per line: a sprite or a modifier chain, and the ticks it shows (Diamon
 //! steps at 60 a second). `loop`, the default, or `once`.
 //!
+//! ## Tilesets and tilemaps
+//!
+//! ```text
+//! tileset ground 8x8 palette=dawn
+//!   tile brick
+//!     ...rows...
+//!   terrain dirt 47
+//!     island
+//!       ...rows...
+//!     h_strip
+//!     v_strip
+//!     inner
+//!     fill
+//!
+//! tilemap level tileset=ground
+//!   legend
+//!     .  empty
+//!     #  dirt   solid
+//!     b  brick  solid
+//!   map
+//!     ..bb..
+//!     ######
+//! ```
+//!
+//! A terrain's pieces are whole tiles; spritebox assembles its 16 or 47 variants
+//! from their quarters (see [`Piece::for_quarter`] and [`Scheme::variant`]). A map
+//! cell of a terrain takes the variant for its neighbours. [`Tileset`] and
+//! [`Tilemap`] hold the result: tile indices from 1, 0 for an empty cell, and the
+//! solid indices. The README documents the rules in full.
+//!
 //! # Errors
 //!
 //! Errors are [`Error`] values with a stable [`ErrorCode`] and, for text, the
@@ -111,13 +141,15 @@
 //! [`Sprite::render`] gives an [`Image`]: RGBA8 pixels, sRGB-encoded and not
 //! premultiplied, tightly packed, top row first. [`Document::atlas`] packs every
 //! sprite into one texture, with each one's [`Rect`] and the animations' frames, as
-//! structs and as JSON. [`png`] encodes and decodes PNG files, and
+//! structs and as JSON, and [`Document::export`] adds a texture for each tileset and
+//! the tilemaps. [`png`] encodes and decodes PNG files, and
 //! [`Document::preview`] draws a preview sheet.
 #![forbid(unsafe_code)]
 
 mod atlas;
 mod document;
 mod error;
+mod export;
 mod image;
 mod json;
 mod label;
@@ -126,11 +158,14 @@ pub mod png;
 mod preview;
 mod sprite;
 mod text;
+mod tiles;
 
 pub use atlas::{Atlas, AtlasAnimation, AtlasFrame, AtlasOptions, Rect, Region};
 pub use document::{Animation, Document, Frame, check};
 pub use error::{Error, ErrorCode, Position, Result};
+pub use export::{ATLAS_FILE, Export, ExportOptions, METADATA_FILE, TilesetExport};
 pub use image::{Color, Image};
 pub use limits::Limits;
 pub use preview::PreviewOptions;
 pub use sprite::{Palette, Sprite};
+pub use tiles::{BLOB_MASKS, Piece, Scheme, Terrain, Tilemap, Tileset, neighbours, reduce};

@@ -129,18 +129,20 @@ fn render_writes_files() {
         );
     }
     let doc = spritebox::Document::parse(&std::fs::read_to_string(COIN).unwrap()).unwrap();
-    let options = spritebox::AtlasOptions {
-        padding: 2,
-        extrude: true,
+    let options = spritebox::ExportOptions {
+        atlas: spritebox::AtlasOptions {
+            padding: 2,
+            extrude: true,
+        },
     };
-    let atlas = doc.atlas(&options).unwrap();
+    let export = doc.export(&options).unwrap();
     assert_eq!(
         spritebox::png::read_file(dir.join("atlas.png")).unwrap(),
-        atlas.image
+        export.atlas.image
     );
     assert_eq!(
         std::fs::read_to_string(dir.join("spritebox.json")).unwrap(),
-        atlas.to_json("atlas.png")
+        export.to_json()
     );
     let preview = doc
         .preview(&spritebox::PreviewOptions {
@@ -151,6 +153,35 @@ fn render_writes_files() {
     assert_eq!(
         spritebox::png::read_file(dir.join("preview.png")).unwrap(),
         preview
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn render_writes_tilesets() {
+    let dir = temp_dir("render-tiles");
+    let tiles = concat!(env!("CARGO_MANIFEST_DIR"), "/examples/tiles.spritebox");
+    let out = spritebox(&["render", tiles, "--out", dir.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let doc = spritebox::Document::parse(&std::fs::read_to_string(tiles).unwrap()).unwrap();
+    let tileset = doc.tileset("ground").unwrap();
+    assert_eq!(
+        spritebox::png::read_file(dir.join("tileset-ground.png")).unwrap(),
+        tileset.render()
+    );
+    let text = stdout(&out);
+    let written: Vec<&str> = text
+        .lines()
+        .map(|l| l.rsplit('/').next().unwrap())
+        .collect();
+    assert_eq!(
+        written,
+        [
+            "atlas.png",
+            "tileset-ground.png",
+            "spritebox.json",
+            "preview.png"
+        ]
     );
     std::fs::remove_dir_all(dir).unwrap();
 }

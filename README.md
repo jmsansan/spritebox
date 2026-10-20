@@ -3,9 +3,10 @@
 [![MSRV 1.85](https://img.shields.io/badge/rust-1.85%2B-blue.svg)](#install)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-**2D pixel art as plain text, in safe Rust with zero dependencies: palettes, sprites
-and animations written as text, validated with exact diagnostics, and rendered to
-RGBA images, PNG files, atlases with their metadata, and preview sheets.**
+**2D pixel art as plain text, in safe Rust with zero dependencies: palettes, sprites,
+animations, autotiled tilesets and tilemaps written as text, validated with exact
+diagnostics, and rendered to RGBA images, PNG files, atlases with their metadata,
+and preview sheets.**
 
 No C libraries, build scripts or `unsafe`: only the standard library, with its own
 PNG encoder and decoder, DEFLATE, CRC-32 and Adler-32. The same text gives the same
@@ -29,10 +30,11 @@ which does the same for game audio.
 | Animations: frames with ticks, looping or once | Available |
 | Diagnostics with line, column and stable code; all errors at once | Available |
 | RGBA8 output, PNG writing and reading | Available |
+| Tilesets, with 16- and 47-variant autotiling from 4 or 5 hand-drawn pieces | Available |
+| Tilemaps: grids of tile indices from a legend, autotiled, with solid tiles | Available |
 | Atlases: packed sprites and frames with padding; metadata as Rust structs and JSON | Available |
 | Preview sheets | Available (sprites, animations) |
 | Command-line tool: `check`, `render` | Available |
-| Tilesets with 16- and 47-variant autotiling, tilemaps with solid tiles | Planned |
 | Pixel fonts with TrueType export | Planned |
 | Seeded procedural textures: value noise and ordered dithering | Planned |
 
@@ -230,6 +232,130 @@ animation coin_spin loop
 A frame's chain builds a sprite named by the chain, such as `coin_edge:flip_x`;
 `Document::sprite` finds it, and `Document::frame_sprites` lists them.
 
+### Tilesets
+
+![The preview sheet of examples/tiles.spritebox](https://raw.githubusercontent.com/jmsansan/spritebox/main/docs/tiles-preview.png)
+
+`tileset NAME WxH [palette=PALETTE] [columns=N]`, then its tiles: plain tiles, and
+terrains whose variants spritebox builds.
+
+```text
+tileset ground 8x8 palette=ground
+  tile brick            ; rows of keys, as for a sprite
+    rrrRrrrR
+    ...
+  tile spikes = spike   ; or a sprite of the tile's size and palette, through a chain
+  terrain dirt 47       ; five pieces; spritebox builds the 47 variants
+    island
+      .kkkkkk.
+      ...
+    h_strip
+      ...
+    v_strip
+      ...
+    inner
+      ...
+    fill
+      ...
+  terrain stone 16      ; four pieces; spritebox builds the 16 variants
+    island = stone_island
+    h_strip
+      ...
+    v_strip
+      ...
+    fill
+      ...
+```
+
+**Tile indices** start at 1, so that 0 can mean an empty cell. Tiles are numbered in
+the order written, and a terrain takes 16 or 47 consecutive indices, its variants in
+order; variant `v` of terrain `dirt` is named `dirt/v`. The tileset's texture is a
+grid `columns` tiles wide (8 by default, fewer for fewer tiles), tile 1 at the top
+left, row by row, with no spacing.
+
+### Autotiling
+
+A terrain is drawn as a few whole tiles, its **pieces**, each the tile as it looks
+with certain neighbours of the same terrain:
+
+| Piece | The tile when it connects to | It shows |
+| --- | --- | --- |
+| `island` | nothing | edges on all four sides, outer corners |
+| `h_strip` | east and west | edges at the top and the bottom |
+| `v_strip` | north and south | edges at the left and the right |
+| `inner` | north, east, south and west, but no corner | no edges, an inner corner in each corner (47 only) |
+| `fill` | all eight neighbours | no edges |
+
+A `16` terrain needs `island`, `h_strip`, `v_strip` and `fill`; a `47` terrain needs
+`inner` too. Pieces may be rows or `PIECE = CHAIN`. The tile size must be even.
+
+Each variant is assembled from **quarters**. A quarter looks at the two edge
+neighbours beside it (north or south, and west or east) and the corner between them,
+and is copied from the same quarter of one piece:
+
+| Edge neighbour north/south | Edge neighbour west/east | Corner | Quarter from |
+| --- | --- | --- | --- |
+| no | no | any | `island` |
+| no | yes | any | `h_strip` |
+| yes | no | any | `v_strip` |
+| yes | yes | no | `inner` |
+| yes | yes | yes | `fill` |
+
+So the north-west quarter of a tile with land to the north and west but not
+north-west comes from `inner`, and shows its inner corner. A `16` terrain ignores
+corners and treats them as connected, so it never needs `inner`.
+
+**Variant order.** Neighbours are bits, clockwise from north: N = 1, NE = 2, E = 4,
+SE = 8, S = 16, SW = 32, W = 64, NW = 128.
+
+- A `16` terrain's variant is `N + 2·E + 4·S + 8·W`, with each letter 1 when that
+  neighbour connects: variant 0 is an island, 15 is surrounded.
+- A `47` terrain first clears each corner bit unless both edge bits beside it are
+  set, since a corner matters only then. The variant is the position of that mask
+  among the 47 such masks in ascending order:
+
+  ```text
+  0, 1, 4, 5, 7, 16, 17, 20, 21, 23, 28, 29, 31, 64, 65, 68, 69, 71, 80, 81, 84, 85,
+  87, 92, 93, 95, 112, 113, 116, 117, 119, 124, 125, 127, 193, 197, 199, 209, 213,
+  215, 221, 223, 241, 245, 247, 253, 255
+  ```
+
+  Variant 0 is an island, and 46 (mask 255) is surrounded.
+
+`Scheme::variant` and `Terrain::index` compute this in Rust, and `BLOB_MASKS` is the
+list. The tests check all 256 neighbour masks against these rules, for both schemes.
+
+### Tilemaps
+
+`tilemap NAME [tileset=TILESET] [outside=same|empty]`, then a `legend` and a `map`:
+
+```text
+tilemap level tileset=ground
+  legend
+    .  empty
+    #  dirt    solid    ; a terrain: autotiled
+    b  brick   solid    ; a tile
+    5  dirt/5           ; one variant of a terrain, fixed
+    ^  spikes
+  map
+    ..........bbbb....
+    ...###............
+    ...###...^^^......
+    ##################
+```
+
+- **Legend.** One line per key: one character, then `empty`, a tile, a terrain or a
+  terrain's variant `TERRAIN/N`, then `solid` if those tiles are solid.
+- **Map.** Rows of legend keys, all of the same width.
+- **Autotiling.** A terrain cell takes the variant for its neighbours of the same
+  terrain, fixed variants of that terrain included. Different terrains do not
+  connect to each other. With `outside=same`, the default, cells beyond the map's
+  edges connect, so ground runs off the screen; `outside=empty` closes the edges.
+- **Solid tiles.** The map's solid set holds the indices of every solid legend entry,
+  all the variants of a solid terrain included. An index cannot be solid under one
+  key and not under another. `tileset=` may be left out when the file has one
+  tileset.
+
 ## Output
 
 **RGBA8.** `Sprite::render` returns an `Image`: RGBA8 pixels, sRGB-encoded and not
@@ -290,15 +416,53 @@ each frame's rectangle and ticks. `Atlas::to_json` writes the same as JSON; for
 - `version` changes only when a change would break a reader; new members may be
   added without one.
 
-**For Diamon.** Register `atlas.image` with `TextureStore::register` under a URI,
-with nearest sampling. A sprite's `Rect` is the `region` of `diamon.sprite2d`, and
-an animation's frames, a rectangle and ticks each, are a clip of
-`diamon.sprite_animation2d`; `looping` says whether it loops.
+**Export.** `Document::export` gives everything a game needs: the atlas, a texture
+for each tileset, and the tilemaps. `Export::files` names them `atlas.png`,
+`tileset-NAME.png` and `spritebox.json`, and `Export::to_json` adds `tilesets` and
+`tilemaps` to the atlas's JSON:
 
-**Preview sheets.** `Document::preview` draws every sprite, and every animation's
-frames in a row with their ticks, scaled up by an integer factor (4 by default), on a
-checkerboard that shows transparency, with lines between pixels, labelled with names,
-sizes and ticks in a small built-in pixel font.
+```json
+  "tilesets": {
+    "ground": {
+      "image": "tileset-ground.png",
+      "size": [64, 72],
+      "tile_size": [8, 8],
+      "columns": 8,
+      "tiles": ["dirt/0", "dirt/1", "...", "brick", "spikes"],
+      "terrains": {"dirt": {"variants": 47, "first": 1}, "stone": {"variants": 16, "first": 48}}
+    }
+  },
+  "tilemaps": {
+    "level": {
+      "tileset": "ground",
+      "size": [32, 9],
+      "tiles": [
+        [0, 0, 0, 64, 64, 0, "..."],
+        [32, 32, 34, 47, 46, 32, "..."]
+      ],
+      "solid": [1, 2, 3, "..."]
+    }
+  }
+```
+
+(Shortened; the file writes every tile name, row and index, one string or row a line.)
+`tiles` lists the tile names in index order, so `tiles[0]` is tile 1. A map's `tiles`
+are its rows from the top, each a list of indices, 0 for an empty cell. `solid` is
+ascending.
+
+**For Diamon.** Register `atlas.png` with `TextureStore::register` under a URI, with
+nearest sampling. A sprite's `Rect` is the `region` of `diamon.sprite2d`, and an
+animation's frames, a rectangle and ticks each, are a clip of
+`diamon.sprite_animation2d`. A tilemap is a `diamon.tilemap2d`: its tileset's texture
+and `tile_size`, its rows of indices with 0 as empty, and its `solid` indices for
+collision.
+
+**Preview sheets.** `Document::preview` draws every sprite; every animation's frames
+in a row with their ticks; every tileset's tiles with their indices; and the top-left
+64 × 36 tiles of each tilemap, beside a copy with its solid tiles tinted red. Sprites
+and tiles are scaled up by an integer factor (4 by default), maps by half of it, on a
+checkerboard that shows transparency, with lines between pixels or tiles, labelled
+with names, sizes and ticks in a small built-in pixel font.
 
 ## Command-line tool
 
@@ -309,8 +473,8 @@ spritebox render <file> --out <dir> [--scale <n>] [--padding <n>] [--extrude] [-
 
 - `check` validates a file and prints every diagnostic, as
   `file:line:column: error[code]: message` on standard error, or as JSON.
-- `render` validates a file, then writes `atlas.png`, its metadata
-  `spritebox.json`, and `preview.png` to `<dir>`. Nothing is written when the file
+- `render` validates a file, then writes `atlas.png`, `tileset-NAME.png` for each
+  tileset, the metadata `spritebox.json`, and `preview.png` to `<dir>`. Nothing is written when the file
   has errors. `--scale` sets the preview's scale, and `--padding` and `--extrude`
   the atlas's.
 - `<file>` may be `-` for standard input.
@@ -361,6 +525,8 @@ hand-written files and untrusted input; raise them for trusted input.
 | `max_sprite_side` | 1024 pixels |
 | `max_layers` | 16 layers in a sprite |
 | `max_frames` | 1024 frames in an animation |
+| `max_tiles` | 4096 tiles in a tileset, terrain variants included |
+| `max_map_side` | 1024 tiles |
 | `max_nesting` | 32 levels of palettes copied `from=` others, or of sprites derived from sprites |
 | `max_image_side` | 8192 pixels, for any image created or decoded |
 | `max_image_pixels` | 16 Mi pixels, for any image, and for all sprites together |
@@ -375,8 +541,10 @@ fn parse_trusted(text: &str) -> spritebox::Result<Document> {
 
 ## Limitations
 
-- No tilesets, tilemaps, fonts or procedural textures yet; see the capability table
-  for what comes next.
+- No pixel fonts or procedural textures yet; see the capability table for what comes
+  next.
+- Terrains connect only to themselves: there are no transitions between terrains,
+  such as grass meeting sand, and no animated tiles.
 - An atlas is one texture; when the sprites do not fit within
   `Limits::max_image_side`, building it fails rather than spilling into a second.
 - Color is sRGB throughout, and alpha is composited in sRGB with integer arithmetic.

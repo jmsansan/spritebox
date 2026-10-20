@@ -4,6 +4,7 @@ mod animation;
 mod chain;
 mod lex;
 mod sprite;
+mod tiles;
 
 use std::collections::HashMap;
 
@@ -11,9 +12,10 @@ use crate::{Color, Document, Error, ErrorCode, Limits, Palette, Position, Sprite
 use animation::AnimationDef;
 use lex::{Node, Token};
 use sprite::SpriteDef;
+use tiles::{TilemapDef, TilesetDef};
 
 /// The directives that start a definition.
-const DIRECTIVES: &str = "`palette`, `sprite` or `animation`";
+const DIRECTIVES: &str = "`palette`, `sprite`, `animation`, `tileset` or `tilemap`";
 
 /// Parses `text`. Returns the document, complete when there are no errors, and the
 /// errors ordered by position.
@@ -38,6 +40,8 @@ pub(crate) fn parse(text: &str, limits: &Limits) -> (Document, Vec<Error>) {
         palettes: Vec::new(),
         sprites: Vec::new(),
         animations: Vec::new(),
+        tilesets: Vec::new(),
+        tilemaps: Vec::new(),
     };
     for (count, node) in nodes.iter().enumerate() {
         if count == limits.max_definitions {
@@ -75,6 +79,8 @@ struct Parser<'a, 'l> {
     palettes: Vec<PaletteDef<'a>>,
     sprites: Vec<SpriteDef<'a>>,
     animations: Vec<AnimationDef<'a>>,
+    tilesets: Vec<TilesetDef<'a>>,
+    tilemaps: Vec<TilemapDef<'a>>,
 }
 
 /// The words of a definition's first line after its keyword and name: positional
@@ -214,6 +220,8 @@ impl<'a> Parser<'a, '_> {
             "palette" => self.palette(node),
             "sprite" => self.sprite(node),
             "animation" => self.animation(node),
+            "tileset" => self.tileset(node),
+            "tilemap" => self.tilemap(node),
             other => Err(node.line.first().error(
                 ErrorCode::Syntax,
                 format!("Unknown directive `{other}`; expected {DIRECTIVES}"),
@@ -269,11 +277,15 @@ impl<'a> Parser<'a, '_> {
         let sprites = self.spend(sprites, &mut budget);
         let (animations, frame_sprites) = self.resolve_animations(&palettes, &sprites);
         let frame_sprites = self.spend(frame_sprites, &mut budget);
+        let tilesets = self.resolve_tilesets(&palettes, &sprites);
+        let tilemaps = self.resolve_tilemaps(&tilesets);
         Document {
             palettes,
             sprites,
             frame_sprites,
             animations,
+            tilesets,
+            tilemaps,
         }
     }
 

@@ -5,7 +5,9 @@ use std::io::Read as _;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use spritebox::{AtlasOptions, Document, Error, ErrorCode, Limits, Position, PreviewOptions, png};
+use spritebox::{
+    AtlasOptions, Document, Error, ErrorCode, ExportOptions, Limits, Position, PreviewOptions, png,
+};
 
 const USAGE: &str = "\
 spritebox: 2D pixel art as plain text
@@ -14,8 +16,8 @@ Usage:
   spritebox check <file> [--json]
       Validate a file and print its diagnostics.
   spritebox render <file> --out <dir> [--scale <n>] [--padding <n>] [--extrude] [--json]
-      Validate a file, then write atlas.png, spritebox.json (the atlas's
-      metadata) and preview.png to <dir>.
+      Validate a file, then write atlas.png, tileset-<name>.png for each
+      tileset, spritebox.json (the metadata) and preview.png to <dir>.
 
 <file> may be `-` for standard input.
 
@@ -183,11 +185,6 @@ fn read_input(file: &str) -> Result<Result<String, Error>, Error> {
     }))
 }
 
-/// The files that `render` writes, in this order.
-const ATLAS: &str = "atlas.png";
-const METADATA: &str = "spritebox.json";
-const PREVIEW: &str = "preview.png";
-
 fn render(
     document: &Document,
     out: &Path,
@@ -195,7 +192,12 @@ fn render(
     limits: &Limits,
 ) -> Result<Vec<PathBuf>, Error> {
     // Everything is made before anything is written.
-    let atlas = document.atlas_with(&options.atlas, limits)?;
+    let export = document.export_with(
+        &ExportOptions {
+            atlas: options.atlas.clone(),
+        },
+        limits,
+    )?;
     let preview = document.preview_with(
         &PreviewOptions {
             scale: options.scale,
@@ -203,11 +205,8 @@ fn render(
         },
         limits,
     )?;
-    let files = [
-        (ATLAS, png::encode(&atlas.image)),
-        (METADATA, atlas.to_json(ATLAS).into_bytes()),
-        (PREVIEW, png::encode(&preview)),
-    ];
+    let mut files = export.files();
+    files.push(("preview.png".to_owned(), png::encode(&preview)));
     let io = |path: &Path, e: std::io::Error| {
         Error::new(
             ErrorCode::Io,
