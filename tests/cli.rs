@@ -124,7 +124,7 @@ fn render_writes_files() {
     let json = stdout(&out);
     for name in ["atlas.png", "spritebox.json", "preview.png"] {
         assert!(
-            json.contains(&dir.join(name).display().to_string()),
+            json.contains(&format!("{:?}", dir.join(name).display().to_string())),
             "{json}"
         );
     }
@@ -173,7 +173,7 @@ fn render_writes_tilesets() {
     let text = stdout(&out);
     let written: Vec<&str> = text
         .lines()
-        .map(|l| l.rsplit('/').next().unwrap())
+        .map(|l| l.rsplit(['/', '\\']).next().unwrap())
         .collect();
     assert_eq!(
         written,
@@ -248,7 +248,7 @@ fn imports_are_read_from_disk_relative_to_the_file() {
     );
     let out = spritebox(&["check", &main]);
     assert_eq!(out.status.code(), Some(1));
-    let expected = dir.join("art/shared/palettes.spritebox");
+    let expected = dir.join("art").join("shared").join("palettes.spritebox");
     let text = stderr(&out);
     assert!(
         text.contains(&format!(

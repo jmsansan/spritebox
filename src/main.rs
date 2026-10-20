@@ -164,7 +164,7 @@ fn run(options: &Options) -> ExitCode {
     // Imports are read from disk, relative to the file's directory.
     let base = base_dir(&options.file);
     let mut loader = |name: &str| -> Result<String, Error> {
-        let path = base.join(name);
+        let path = import_path(&base, name);
         std::fs::read_to_string(&path)
             .map_err(|e| Error::new(ErrorCode::Io, format!("{}: {e}", path.display())))
     };
@@ -320,10 +320,24 @@ fn base_dir(file: &str) -> PathBuf {
         .unwrap_or_default()
 }
 
+/// The path of an imported file: its `/`-separated name under `base`, with the
+/// platform's separators.
+fn import_path(base: &Path, name: &str) -> PathBuf {
+    let mut path = if name.starts_with('/') {
+        PathBuf::from("/")
+    } else {
+        base.to_path_buf()
+    };
+    path.extend(name.split('/').filter(|part| !part.is_empty()));
+    path
+}
+
 /// The file an error is in, as the user would open it.
 fn error_file(options: &Options, e: &Error, main: &str) -> String {
     match &e.file {
-        Some(imported) => base_dir(&options.file).join(imported).display().to_string(),
+        Some(imported) => import_path(&base_dir(&options.file), imported)
+            .display()
+            .to_string(),
         None => main.to_owned(),
     }
 }
