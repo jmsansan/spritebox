@@ -601,6 +601,7 @@ impl<'a> Parser<'a, '_> {
                     height: def.height,
                     palette: palette.clone(),
                     layers: vec![Layer { name: None, keys }],
+                    slice: None,
                 })
             }
             Source::Chain(chain) => {
@@ -649,6 +650,7 @@ impl<'a> Parser<'a, '_> {
                     return None;
                 }
                 sprite.name = name;
+                sprite.slice = None;
                 Some(sprite)
             }
         }

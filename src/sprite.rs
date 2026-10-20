@@ -24,6 +24,24 @@ impl Palette {
 /// Marks a pixel that no key covers in a layer.
 pub(crate) const EMPTY: char = '\0';
 
+/// The borders of a nine-slice panel, in pixels from each edge: the corners keep their
+/// size while the edges and the middle stretch.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+pub struct Insets {
+    pub left: u32,
+    pub top: u32,
+    pub right: u32,
+    pub bottom: u32,
+}
+
+impl Insets {
+    /// Whether the insets fit in a sprite of `width` × `height`.
+    pub fn fits(self, width: u32, height: u32) -> bool {
+        self.left as u64 + self.right as u64 <= width as u64
+            && self.top as u64 + self.bottom as u64 <= height as u64
+    }
+}
+
 /// One layer of a sprite: a key for each pixel, row by row, or [`EMPTY`].
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct Layer {
@@ -44,9 +62,15 @@ pub struct Sprite {
     pub(crate) height: u32,
     pub(crate) palette: Palette,
     pub(crate) layers: Vec<Layer>,
+    pub(crate) slice: Option<Insets>,
 }
 
 impl Sprite {
+    /// The borders of a nine-slice panel, when the sprite is one (`slice=`). Flips,
+    /// rotations and padding carry them along; an offset drops them.
+    pub fn slice(&self) -> Option<Insets> {
+        self.slice
+    }
     pub fn name(&self) -> &str {
         &self.name
     }
@@ -110,6 +134,7 @@ impl Sprite {
         op: &str,
         width: u32,
         height: u32,
+        slice: Option<Insets>,
         map: impl Fn(u32, u32) -> Option<(u32, u32)>,
     ) -> Sprite {
         let layers = self
@@ -139,30 +164,52 @@ impl Sprite {
             height,
             palette: self.palette.clone(),
             layers,
+            slice,
         }
     }
 
     /// The sprite mirrored left to right (`:flip_x`).
     pub fn flip_x(&self) -> Sprite {
         let w = self.width;
-        self.derive("flip_x", w, self.height, |x, y| Some((w - 1 - x, y)))
+        let slice = self.slice.map(|i| Insets {
+            left: i.right,
+            right: i.left,
+            ..i
+        });
+        self.derive("flip_x", w, self.height, slice, |x, y| Some((w - 1 - x, y)))
     }
 
     /// The sprite mirrored top to bottom (`:flip_y`).
     pub fn flip_y(&self) -> Sprite {
         let h = self.height;
-        self.derive("flip_y", self.width, h, |x, y| Some((x, h - 1 - y)))
+        let slice = self.slice.map(|i| Insets {
+            top: i.bottom,
+            bottom: i.top,
+            ..i
+        });
+        self.derive("flip_y", self.width, h, slice, |x, y| Some((x, h - 1 - y)))
     }
 
     /// The sprite rotated clockwise by `quarter_turns` × 90 degrees (`:rot90`,
     /// `:rot180`, `:rot270`). A quarter turn swaps the width and the height.
     pub fn rotate(&self, quarter_turns: u32) -> Sprite {
         let (w, h) = (self.width, self.height);
+        // Each quarter turn clockwise moves the left border to the top.
+        let turn = |i: Insets| Insets {
+            left: i.bottom,
+            top: i.left,
+            right: i.top,
+            bottom: i.right,
+        };
+        let mut slice = self.slice;
+        for _ in 0..quarter_turns % 4 {
+            slice = slice.map(turn);
+        }
         match quarter_turns % 4 {
-            0 => self.derive("rot0", w, h, |x, y| Some((x, y))),
-            1 => self.derive("rot90", h, w, |x, y| Some((y, h - 1 - x))),
-            2 => self.derive("rot180", w, h, |x, y| Some((w - 1 - x, h - 1 - y))),
-            _ => self.derive("rot270", h, w, |x, y| Some((w - 1 - y, x))),
+            0 => self.derive("rot0", w, h, slice, |x, y| Some((x, y))),
+            1 => self.derive("rot90", h, w, slice, |x, y| Some((y, h - 1 - x))),
+            2 => self.derive("rot180", w, h, slice, |x, y| Some((w - 1 - x, h - 1 - y))),
+            _ => self.derive("rot270", h, w, slice, |x, y| Some((w - 1 - y, x))),
         }
     }
 
@@ -175,6 +222,7 @@ impl Sprite {
             &format!("offset({dx},{dy})"),
             self.width,
             self.height,
+            None,
             |x, y| {
                 let (sx, sy) = (x as i64 - dx as i64, y as i64 - dy as i64);
                 (sx >= 0 && sy >= 0 && sx < w && sy < h).then_some((sx as u32, sy as u32))
@@ -199,9 +247,17 @@ impl Sprite {
             )));
         };
         let (w, h) = (self.width, self.height);
-        Ok(self.derive(&format!("pad({n})"), width, height, |x, y| {
-            (x >= n && y >= n && x - n < w && y - n < h).then(|| (x - n, y - n))
-        }))
+        let slice = self.slice.map(|i| Insets {
+            left: i.left + n,
+            top: i.top + n,
+            right: i.right + n,
+            bottom: i.bottom + n,
+        });
+        Ok(
+            self.derive(&format!("pad({n})"), width, height, slice, |x, y| {
+                (x >= n && y >= n && x - n < w && y - n < h).then(|| (x - n, y - n))
+            }),
+        )
     }
 
     /// The same keys colored by `palette` (`:swap(palette)`), which must have every
@@ -335,6 +391,7 @@ mod tests {
                 name: None,
                 keys: rows.iter().flat_map(|r| r.chars()).collect(),
             }],
+            slice: None,
         }
     }
 

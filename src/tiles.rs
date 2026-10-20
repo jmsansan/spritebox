@@ -200,6 +200,7 @@ pub(crate) fn assemble(pieces: &[Sprite; 5], scheme: Scheme, mask: u8, name: Str
             .into_iter()
             .map(|keys| Layer { name: None, keys })
             .collect(),
+        slice: None,
     }
 }
 

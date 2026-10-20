@@ -445,9 +445,11 @@ fn derived_sprites_may_come_first() {
 fn animations() {
     let doc: Document = field(
         "animation spin
-  s          6
-  s:flip_x   3   ; a chain builds a frame sprite
-  s:flip_x   3
+  s                 6
+  s:flip_x          3   ; a trailing flip is a flag of the frame
+  s:rot90:flip_y    3   ; a chain builds a frame sprite; the flip stays a flag
+  s:rot180          1   ; both flips
+  s:flip_x:flip_x   1   ; no flip at all
 animation hit once
   s:swap(q)  2
 ",
@@ -456,18 +458,27 @@ animation hit once
     .unwrap();
     let spin = doc.animation("spin").unwrap();
     assert!(spin.looping());
-    assert_eq!(spin.total_ticks(), 12);
-    let frames: Vec<(&str, u32)> = spin
+    assert_eq!(spin.total_ticks(), 14);
+    let frames: Vec<(&str, u32, bool, bool)> = spin
         .frames()
         .iter()
-        .map(|f| (f.sprite(), f.ticks()))
+        .map(|f| (f.sprite(), f.ticks(), f.flip_x(), f.flip_y()))
         .collect();
-    assert_eq!(frames, [("s", 6), ("s:flip_x", 3), ("s:flip_x", 3)]);
+    assert_eq!(
+        frames,
+        [
+            ("s", 6, false, false),
+            ("s", 3, true, false),
+            ("s:rot90", 3, false, true),
+            ("s", 1, true, true),
+            ("s", 1, false, false)
+        ]
+    );
     let hit = doc.animation("hit").unwrap();
     assert!(!hit.looping());
     let built: Vec<&str> = doc.frame_sprites().iter().map(|s| s.name()).collect();
-    assert_eq!(built, ["s:flip_x", "s:swap(q)"]);
-    assert_eq!(grid(&doc, "s:flip_x"), [".ak", "b.."]);
+    assert_eq!(built, ["s:rot90", "s:swap(q)"]);
+    assert_eq!(grid(&doc, "s:rot90"), [".k", ".a", "b."]);
     assert!(doc.sprites().iter().all(|s| !s.name().contains(':')));
     let explicit: Document = field("animation a loop\n  s 1\n").parse().unwrap();
     assert!(explicit.animation("a").unwrap().looping());

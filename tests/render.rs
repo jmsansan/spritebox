@@ -161,7 +161,6 @@ fn golden_showcase() {
         "arrow 0x4764a09a1ea97c85",
         "arrow_down 0x21e1efaa8353da05",
         "badge 0xd90dbc557dffcd3d",
-        "coin_edge:flip_x 0xd12e87feea1b4b8e",
         "sprout:offset(0,1) 0x9cc406057b316335",
         "sprout:swap(dusk) 0x526bcf94e6169a7f",
     ];

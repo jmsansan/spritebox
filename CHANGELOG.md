@@ -17,7 +17,10 @@
 - Derived sprites and modifier chains: `flip_x`, `flip_y`, `rot90`, `rot180`,
   `rot270`, `offset(dx,dy)`, `pad(n)`, `swap(palette)` and `outline(key)`, also as
   methods of `Sprite`.
-- Animations: frames of sprites or chains with ticks, looping or once.
+- Animations: frames of sprites or chains with ticks, looping or once. A frame's
+  trailing flips are flags of the frame, not flipped pixels.
+- Panels: `slice=` marks a sprite as a nine-slice panel; its borders follow flips,
+  rotations and padding, and appear in the metadata.
 - Tileset textures with the atlas's padding and extrusion.
 - Tilesets of plain tiles and autotiled terrains: 16 variants from 4 pieces, or 47
   from 5, assembled by quarters from each tile's neighbours.
@@ -28,6 +31,7 @@
 - Pixel fonts: glyph grids with an advance, a baseline and a line height; text drawn
   with them; and TrueType export whose outlines are the pixels as squares, merged
   where they share an edge, with the em at the glyph height.
+- A metadata reference in the README: every field, with its units and origin.
 - Atlases: sprites and frame sprites packed into one texture with padding,
   extruded by default, within a largest side of 2048 by default, identical sprites shared, with each sprite's rectangle and
   each animation's frames as Rust structs and as JSON written by the crate.

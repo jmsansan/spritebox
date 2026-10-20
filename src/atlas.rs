@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use crate::json::{Writer, list, quote};
-use crate::{Document, Error, Image, Limits, Result};
+use crate::{Document, Error, Image, Insets, Limits, Result};
 
 /// How sprites are packed into an atlas.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -71,6 +71,8 @@ pub struct Region {
     /// A sprite's name, or the modifier chain of an animation frame's sprite.
     pub name: String,
     pub rect: Rect,
+    /// The sprite's nine-slice borders, when it is a panel.
+    pub slice: Option<Insets>,
 }
 
 /// An animation, with the atlas rectangle of each frame.
@@ -89,6 +91,10 @@ pub struct AtlasFrame {
     pub sprite: String,
     pub rect: Rect,
     pub ticks: u32,
+    /// Draw the rectangle mirrored left to right.
+    pub flip_x: bool,
+    /// Draw the rectangle mirrored top to bottom.
+    pub flip_y: bool,
 }
 
 /// Every sprite of a document in one texture, and where each one is.
@@ -136,6 +142,19 @@ impl Atlas {
             w.raw(Some(&region.name), &list(&region.rect.to_array()));
         }
         w.close('}');
+        w.object(Some("panels"));
+        for region in &self.regions {
+            if let Some(i) = region.slice {
+                w.raw(
+                    Some(&region.name),
+                    &format!(
+                        "{{\"left\": {}, \"top\": {}, \"right\": {}, \"bottom\": {}}}",
+                        i.left, i.top, i.right, i.bottom
+                    ),
+                );
+            }
+        }
+        w.close('}');
         w.close('}');
         w.object(Some("animations"));
         for animation in &self.animations {
@@ -149,10 +168,12 @@ impl Atlas {
                 w.raw(
                     None,
                     &format!(
-                        "{{\"sprite\": {}, \"rect\": {}, \"ticks\": {}}}",
+                        "{{\"sprite\": {}, \"rect\": {}, \"ticks\": {}, \"flip_x\": {}, \"flip_y\": {}}}",
                         quote(&frame.sprite),
                         list(&frame.rect.to_array()),
-                        frame.ticks
+                        frame.ticks,
+                        frame.flip_x,
+                        frame.flip_y
                     ),
                 );
             }
@@ -227,6 +248,7 @@ pub(crate) fn build(document: &Document, options: &AtlasOptions, limits: &Limits
         .map(|(s, &u)| Region {
             name: s.name.clone(),
             rect: rect(u),
+            slice: s.slice,
         })
         .collect();
     let find = |name: &str| {
@@ -249,6 +271,8 @@ pub(crate) fn build(document: &Document, options: &AtlasOptions, limits: &Limits
                     sprite: f.sprite.clone(),
                     rect: find(&f.sprite),
                     ticks: f.ticks,
+                    flip_x: f.flip_x,
+                    flip_y: f.flip_y,
                 })
                 .collect(),
         })

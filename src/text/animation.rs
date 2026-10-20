@@ -135,7 +135,9 @@ impl<'a> Parser<'a, '_> {
             seen.insert(def.name.text, def.name.pos);
             let mut frames = Vec::new();
             let mut ok = def.complete;
-            for (chain, ticks) in &def.frames {
+            for (written, ticks) in &def.frames {
+                let (chain, flip_x, flip_y) = written.split_flips();
+                let chain = &chain;
                 let name = chain.canonical();
                 let known = sprites.iter().any(|s| s.name == name)
                     || built.iter().any(|(s, _)| s.name == name);
@@ -165,6 +167,8 @@ impl<'a> Parser<'a, '_> {
                 frames.push(Frame {
                     sprite: name,
                     ticks: *ticks,
+                    flip_x,
+                    flip_y,
                 });
             }
             if ok {

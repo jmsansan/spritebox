@@ -38,13 +38,25 @@ impl Animation {
 pub struct Frame {
     pub(crate) sprite: String,
     pub(crate) ticks: u32,
+    pub(crate) flip_x: bool,
+    pub(crate) flip_y: bool,
 }
 
 impl Frame {
-    /// The frame's sprite: a sprite's name, or a modifier chain such as
-    /// `coin:flip_x`, which [`Document::sprite`] finds too.
+    /// The frame's sprite before its flips: a sprite's name, or a modifier chain such
+    /// as `coin:swap(dusk)`, which [`Document::sprite`] finds too.
     pub fn sprite(&self) -> &str {
         &self.sprite
+    }
+    /// Whether the frame draws its sprite mirrored left to right. A chain's trailing
+    /// `flip_x` (or `rot180`) sets it, rather than a flipped copy of the pixels.
+    pub fn flip_x(&self) -> bool {
+        self.flip_x
+    }
+    /// Whether the frame draws its sprite mirrored top to bottom: a trailing `flip_y`
+    /// or `rot180`.
+    pub fn flip_y(&self) -> bool {
+        self.flip_y
     }
     /// How many ticks the frame shows, at least 1.
     pub fn ticks(&self) -> u32 {
@@ -120,7 +132,8 @@ impl Document {
             .find(|s| s.name == name)
     }
     /// The sprites that animation frames build with modifier chains, in the order
-    /// they are first used. Their names are the chains, written without spaces.
+    /// they are first used. Their names are the chains, written without spaces and
+    /// without the trailing flips that frames state instead.
     pub fn frame_sprites(&self) -> &[Sprite] {
         &self.frame_sprites
     }

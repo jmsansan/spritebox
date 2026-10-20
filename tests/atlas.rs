@@ -112,19 +112,25 @@ fn animations_carry_rectangles_and_ticks() {
         .find(|a| a.name == "coin_spin")
         .unwrap();
     assert!(spin.looping);
-    let frames: Vec<(&str, u32)> = spin
+    let frames: Vec<(&str, u32, bool, bool)> = spin
         .frames
         .iter()
-        .map(|f| (f.sprite.as_str(), f.ticks))
+        .map(|f| (f.sprite.as_str(), f.ticks, f.flip_x, f.flip_y))
         .collect();
+    // `coin_edge:flip_x` is coin_edge's rectangle, flipped when drawn.
     assert_eq!(
         frames,
         [
-            ("coin", 6),
-            ("coin_edge", 6),
-            ("coin_thin", 6),
-            ("coin_edge:flip_x", 6)
+            ("coin", 6, false, false),
+            ("coin_edge", 6, false, false),
+            ("coin_thin", 6, false, false),
+            ("coin_edge", 6, true, false)
         ]
+    );
+    assert_eq!(
+        atlas.region("coin_edge:flip_x"),
+        None,
+        "no flipped copy is packed"
     );
     for frame in &spin.frames {
         assert_eq!(Some(frame.rect), atlas.region(&frame.sprite));
@@ -195,16 +201,16 @@ animation blink once
     "padding": 1,
     "sprites": {{
       "one": {one},
-      "two": {two},
-      "one:flip_y": {one}
-    }}
+      "two": {two}
+    }},
+    "panels": {{}}
   }},
   "animations": {{
     "blink": {{
       "loop": false,
       "frames": [
-        {{"sprite": "one", "rect": {one}, "ticks": 3}},
-        {{"sprite": "one:flip_y", "rect": {one}, "ticks": 2}}
+        {{"sprite": "one", "rect": {one}, "ticks": 3, "flip_x": false, "flip_y": false}},
+        {{"sprite": "one", "rect": {one}, "ticks": 2, "flip_x": false, "flip_y": true}}
       ]
     }}
   }}
@@ -216,11 +222,6 @@ animation blink once
         two = r("two"),
     );
     assert_eq!(atlas.to_json("atlas.png"), expected);
-    assert_eq!(
-        atlas.region("one"),
-        atlas.region("one:flip_y"),
-        "a 1-row sprite flipped vertically is the same"
-    );
 }
 
 #[test]

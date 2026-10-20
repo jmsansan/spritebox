@@ -68,6 +68,8 @@
 //!
 //! `WxH` is the size in pixels, and each of the `H` rows is one word of `W` keys of
 //! the palette. `palette=` may be left out when the file defines one palette.
+//! `slice=N` or `slice=LEFT,TOP,RIGHT,BOTTOM` marks a nine-slice panel, whose
+//! [`Insets`] the metadata states.
 //!
 //! Instead of rows, a sprite may have layers, drawn bottom first, each with rows or
 //! made from another sprite of the same size and palette:
@@ -97,7 +99,8 @@
 //! ```
 //!
 //! One frame per line: a sprite or a modifier chain, and the ticks it shows (Diamon
-//! steps at 60 a second). `loop`, the default, or `once`.
+//! steps at 60 a second). `loop`, the default, or `once`. A chain's trailing flips are
+//! flags of the [`Frame`], since engines flip sprites when they draw them.
 //!
 //! ## Tilesets and tilemaps
 //!
@@ -185,5 +188,5 @@ pub use font::{Font, Glyph, TtfOptions};
 pub use image::{Color, Image};
 pub use limits::Limits;
 pub use preview::PreviewOptions;
-pub use sprite::{Palette, Sprite};
+pub use sprite::{Insets, Palette, Sprite};
 pub use tiles::{BLOB_MASKS, Piece, Scheme, Terrain, Tilemap, Tileset, neighbours, reduce};

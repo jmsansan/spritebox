@@ -5,13 +5,15 @@ use std::collections::HashMap;
 use super::chain::{self, Chain};
 use super::lex::{Node, Token};
 use super::{Header, Parsed, Parser, check_name, duplicate, size};
-use crate::sprite::Layer;
+use crate::sprite::{Insets, Layer};
 use crate::{Error, ErrorCode, Palette, Position, Sprite};
 
 /// A sprite as written, before names and keys are resolved.
 pub(crate) struct SpriteDef<'a> {
     pub name: Token<'a>,
     pub body: Body<'a>,
+    /// Nine-slice insets written with `slice=`, and the value's token.
+    pub slice: Option<(Insets, Token<'a>)>,
 }
 
 pub(crate) enum Body<'a> {
@@ -84,8 +86,12 @@ impl<'a> Parser<'a, '_> {
         if let Some(palette) = palette {
             check_name(palette)?;
         }
+        let slice = match header.option("slice") {
+            Some(token) => Some((insets(token)?, token)),
+            None => None,
+        };
         let name = header.name;
-        header.finish("sprite", "`palette=`")?;
+        header.finish("sprite", "`palette=` or `slice=`")?;
 
         let layered = node
             .children
@@ -139,6 +145,7 @@ impl<'a> Parser<'a, '_> {
         }
         self.sprites.push(SpriteDef {
             name,
+            slice,
             body: Body::Grid {
                 width,
                 height,
@@ -157,14 +164,26 @@ impl<'a> Parser<'a, '_> {
         let chain_token = *tokens.get(3).ok_or_else(|| {
             tokens[2].end_error("Expected a sprite and its modifiers after `=`".to_owned())
         })?;
-        if let Some(extra) = tokens.get(4) {
-            return Err(extra.error(
-                ErrorCode::Syntax,
-                format!(
-                    "Unexpected `{}`; write the modifiers without spaces, such as `coin:flip_x`",
-                    extra.text
-                ),
-            ));
+        let mut slice = None;
+        for &extra in &tokens[4..] {
+            match extra.text.strip_prefix("slice=") {
+                Some(value) if slice.is_none() => {
+                    let token = Token {
+                        text: value,
+                        pos: extra.at("slice=".len()),
+                    };
+                    slice = Some((insets(token)?, token));
+                }
+                _ => {
+                    return Err(extra.error(
+                        ErrorCode::Syntax,
+                        format!(
+                            "Unexpected `{}`; write the modifiers without spaces, such as `coin:flip_x`",
+                            extra.text
+                        ),
+                    ));
+                }
+            }
         }
         if let Some(child) = node.children.first() {
             return Err(child.line.first().error(
@@ -176,6 +195,7 @@ impl<'a> Parser<'a, '_> {
         self.sprites.push(SpriteDef {
             name,
             body: Body::Derived(chain),
+            slice,
         });
         Ok(())
     }
@@ -491,6 +511,7 @@ impl<'a> Parser<'a, '_> {
                             height: *height,
                             palette: palette.clone(),
                             layers: out,
+                            slice: None,
                         },
                         depth,
                     )),
@@ -498,7 +519,21 @@ impl<'a> Parser<'a, '_> {
                 }
             }
         };
-        let (sprite, depth) = result?;
+        let (mut sprite, depth) = result?;
+        // Written insets replace those that a chain carried along.
+        if let Some((insets, token)) = def.slice {
+            if !insets.fits(sprite.width, sprite.height) {
+                self.errors.push(token.error(
+                    ErrorCode::InvalidArgument,
+                    format!(
+                        "The borders of slice={} do not fit in sprite `{}`, {}x{}",
+                        token.text, def.name.text, sprite.width, sprite.height
+                    ),
+                ));
+                return None;
+            }
+            sprite.slice = Some(insets);
+        }
         built[i] = Some(sprite);
         Some(depth)
     }
@@ -556,6 +591,45 @@ impl<'a> Parser<'a, '_> {
             }
         }
         ok.then_some(keys)
+    }
+}
+
+/// `slice=N` for the same border on every side, or `slice=LEFT,TOP,RIGHT,BOTTOM`.
+fn insets(token: Token) -> Parsed<Insets> {
+    let invalid = || {
+        token.error(
+            ErrorCode::Syntax,
+            format!(
+                "Expected `slice=N` or `slice=LEFT,TOP,RIGHT,BOTTOM` in pixels, not `slice={}`",
+                token.text
+            ),
+        )
+    };
+    let values: Vec<u32> = token
+        .text
+        .split(',')
+        .map(|v| {
+            if v.is_empty() || !v.bytes().all(|b| b.is_ascii_digit()) {
+                return None;
+            }
+            v.parse().ok()
+        })
+        .collect::<Option<Vec<u32>>>()
+        .ok_or_else(invalid)?;
+    match values[..] {
+        [n] => Ok(Insets {
+            left: n,
+            top: n,
+            right: n,
+            bottom: n,
+        }),
+        [left, top, right, bottom] => Ok(Insets {
+            left,
+            top,
+            right,
+            bottom,
+        }),
+        _ => Err(invalid()),
     }
 }
 

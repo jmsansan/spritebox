@@ -47,6 +47,28 @@ impl<'a> Chain<'a> {
         name
     }
 
+    /// The chain without its trailing `flip_x`, `flip_y` and `rot180`, and whether
+    /// those flip the result horizontally and vertically (`rot180` flips both). An
+    /// engine flips a sprite when it draws it, so frames state the flips instead of
+    /// storing flipped pixels.
+    pub fn split_flips(&self) -> (Chain<'a>, bool, bool) {
+        let mut chain = self.clone();
+        let (mut flip_x, mut flip_y) = (false, false);
+        while let Some((_, op)) = chain.ops.last() {
+            match op {
+                Op::FlipX => flip_x = !flip_x,
+                Op::FlipY => flip_y = !flip_y,
+                Op::Rotate(2) => {
+                    flip_x = !flip_x;
+                    flip_y = !flip_y;
+                }
+                _ => break,
+            }
+            chain.ops.pop();
+        }
+        (chain, flip_x, flip_y)
+    }
+
     /// Applies the modifiers to `sprite`, the chain's base.
     pub fn apply(&self, sprite: &Sprite, palettes: &[Palette], limits: &Limits) -> Parsed<Sprite> {
         let mut sprite = sprite.clone();

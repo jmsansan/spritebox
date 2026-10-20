@@ -118,9 +118,14 @@ pub(crate) fn sheet(
                         .frames
                         .iter()
                         .map(|f| {
+                            // As an engine draws the frame: flipped as it says.
                             let image = document
                                 .sprite(&f.sprite)
-                                .map(|s| s.render())
+                                .map(|s| {
+                                    let s = if f.flip_x { s.flip_x() } else { s.clone() };
+                                    let s = if f.flip_y { s.flip_y() } else { s };
+                                    s.render()
+                                })
                                 .unwrap_or_else(|| Image::blank(1, 1));
                             Item::new(image, format!("{}t", f.ticks))
                         })

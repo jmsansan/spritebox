@@ -177,6 +177,13 @@ The full file, with a spinning coin, is
 - A key's color is drawn as is, so a key whose color is `transparent` gives a
   transparent pixel.
 
+**Panels.** `slice=N`, or `slice=LEFT,TOP,RIGHT,BOTTOM`, marks a sprite as a
+nine-slice panel: the borders, in pixels from each edge, whose corners keep their size
+while the edges and the middle stretch. The borders must fit in the sprite. A sprite
+derived from a panel keeps its borders through flips, rotations, padding and palette
+swaps (they follow the pixels), loses them through an offset, and may write its own:
+`sprite button_pressed = button:swap(dark) slice=3`.
+
 **Layers.** Instead of rows, a sprite may have layers, drawn bottom first:
 
 ```text
@@ -229,8 +236,13 @@ animation coin_spin loop
   coin_edge:flip_x  6
 ```
 
-A frame's chain builds a sprite named by the chain, such as `coin_edge:flip_x`;
-`Document::sprite` finds it, and `Document::frame_sprites` lists them.
+**Flipped frames.** An engine flips a sprite when it draws it, so a frame states its
+flips instead of storing flipped pixels: the trailing `flip_x`, `flip_y` and `rot180`
+of a frame's chain become its `flip_x` and `flip_y` (`rot180` is both), and the frame's
+sprite is the chain without them. `coin_edge:flip_x` is `coin_edge`, drawn with
+`flip_x`. Any other chain builds a sprite named by the chain, such as
+`coin:swap(dusk)`; `Document::sprite` finds it, and `Document::frame_sprites` lists
+them.
 
 ### Tilesets
 
@@ -447,8 +459,8 @@ keeping the smallest area; it depends only on the sprites, so the same file give
 same atlas.
 
 The `Atlas` holds the image, each sprite's `Rect` in texels, and the animations with
-each frame's rectangle and ticks. `Atlas::to_json` writes the same as JSON; for
-`examples/showcase.spritebox`, in part:
+each frame's rectangle, ticks and flips. `Atlas::to_json` writes the same as JSON, in
+this form (shortened):
 
 ```json
 {
@@ -461,27 +473,26 @@ each frame's rectangle and ticks. `Atlas::to_json` writes the same as JSON; for
     "sprites": {
       "coin": [1, 31, 8, 8],
       "coin_edge": [1, 41, 8, 8],
-      "coin_edge:flip_x": [1, 51, 8, 8]
+      "panel": [11, 1, 16, 16]
+    },
+    "panels": {
+      "panel": {"left": 4, "top": 4, "right": 4, "bottom": 4}
     }
   },
   "animations": {
     "coin_spin": {
       "loop": true,
       "frames": [
-        {"sprite": "coin", "rect": [1, 31, 8, 8], "ticks": 6},
-        {"sprite": "coin_edge", "rect": [1, 41, 8, 8], "ticks": 6},
-        {"sprite": "coin_edge:flip_x", "rect": [1, 51, 8, 8], "ticks": 6}
+        {"sprite": "coin", "rect": [1, 31, 8, 8], "ticks": 6, "flip_x": false, "flip_y": false},
+        {"sprite": "coin_edge", "rect": [1, 41, 8, 8], "ticks": 6, "flip_x": false, "flip_y": false},
+        {"sprite": "coin_edge", "rect": [1, 41, 8, 8], "ticks": 6, "flip_x": true, "flip_y": false}
       ]
     }
   }
 }
 ```
 
-- Rectangles are `[x, y, width, height]` in texels from the top-left corner.
-- `sprites` lists the named sprites in the order defined, then the frame sprites
-  in the order first used. Objects keep that order.
-- `version` changes only when a change would break a reader; new members may be
-  added without one.
+The [metadata reference](#metadata-reference) below lists every field.
 
 **Export.** `Document::export` gives everything a game needs: the atlas, a texture
 for each tileset, the tilemaps, and a TrueType file for each font. `Export::files`
@@ -523,10 +534,47 @@ and `Export::to_json` adds `tilesets`, `tilemaps` and `fonts` to the atlas's JSO
 are its rows from the top, each a list of indices, 0 for an empty cell. `solid` is
 ascending.
 
-**For Diamon.** Register `atlas.png` with `TextureStore::register` under a URI, with
-nearest sampling. A sprite's `Rect` is the `region` of `diamon.sprite2d`, and an
-animation's frames, a rectangle and ticks each, are a clip of
-`diamon.sprite_animation2d`. A tilemap is a `diamon.tilemap2d`: its tileset's texture
+### Metadata reference
+
+`spritebox.json` is one object. Its members appear in this order, and objects keep
+the order of the file: definitions in the order written.
+
+All coordinates are in **texels** (pixels of a texture) from the texture's
+**top-left corner**, with x to the right and **y down**. Rectangles are
+`[x, y, width, height]` and cover the sprite or tile alone, never its padding.
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `format` | `"spritebox"` | Identifies the file. |
+| `version` | integer | The form's version, now `1`. It changes only when a change would break a reader, who should reject a version it does not know; members may be added without a change. |
+| `atlas.image` | string | The atlas texture's file name: `atlas.png`. |
+| `atlas.size` | `[width, height]` | The atlas's size in texels. |
+| `atlas.padding` | integer | Texels around each sprite, extruded or transparent. |
+| `atlas.sprites` | object | For each named sprite, then each frame sprite, its rectangle. Sprites with identical pixels share one. |
+| `atlas.panels` | object | For each sprite with `slice=`, its nine-slice borders `{left, top, right, bottom}`, in texels inward from each edge of its rectangle. |
+| `animations.NAME.loop` | boolean | `true`: after the last frame, start again; `false`: stay on it. |
+| `animations.NAME.frames` | array | The frames in order: `sprite` (a key of `atlas.sprites`), `rect` (its rectangle), `ticks` (how many fixed steps it shows, at least 1; 60 a second in Diamon), and `flip_x` and `flip_y` (draw the rectangle mirrored). |
+| `tilesets.NAME.image` | string | The tileset's texture: `tileset-NAME.png`. |
+| `tilesets.NAME.size` | `[width, height]` | Its size in texels. |
+| `tilesets.NAME.tile_size` | `[width, height]` | A tile's size in texels. |
+| `tilesets.NAME.columns` | integer | Tiles in a row of the texture. |
+| `tilesets.NAME.padding` | integer | Texels around each tile. Tile `i` (from 1) has its top-left corner at `x = padding + ((i - 1) % columns) * (tile_width + 2 * padding)` and `y = padding + ((i - 1) / columns) * (tile_height + 2 * padding)`. |
+| `tilesets.NAME.tiles` | array of strings | The tiles' names in index order: `tiles[0]` is tile 1. A terrain's variants are `TERRAIN/VARIANT`. |
+| `tilesets.NAME.terrains` | object | For each terrain, `variants` (16 or 47) and `first`, the index of its variant 0. |
+| `tilemaps.NAME.tileset` | string | The tileset whose indices the map holds. |
+| `tilemaps.NAME.size` | `[columns, rows]` | The map's size in tiles. |
+| `tilemaps.NAME.tiles` | array of arrays | The rows from the top, each the indices of its cells from the left; 0 is an empty cell and 1 the tileset's first tile. |
+| `tilemaps.NAME.solid` | array | The indices of solid tiles, ascending. |
+| `fonts.NAME.file` | string | The TrueType file: `font-NAME.ttf`. |
+| `fonts.NAME.height` | integer | Pixels from the top of a glyph's grid to its bottom. |
+| `fonts.NAME.baseline` | integer | Pixels of the grid above the baseline. |
+| `fonts.NAME.line_height` | integer | Pixels from one baseline to the next. |
+| `fonts.NAME.units_per_pixel` | integer | TrueType font units per pixel; the em is `height * units_per_pixel`. |
+
+**For Diamon.** Register `atlas.png` with `TextureStore::register` under a URI. A
+sprite's rectangle is the `region` of `diamon.sprite2d`, and a panel's borders are
+the insets of a nine-slice panel. An animation's frames, a rectangle, ticks and flips
+each, are a clip of `diamon.sprite_animation2d`, whose sprites flip when drawn. A tilemap is a `diamon.tilemap2d`: its tileset's texture
 and `tile_size`, its rows of indices with 0 as empty, and its `solid` indices for
 collision. A font needs nothing new: `FontLibrary` takes the TrueType file, and text
 drawn at a multiple of the font's height stays crisp.
