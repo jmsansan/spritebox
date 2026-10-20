@@ -42,10 +42,14 @@ impl<'a> Parser<'a, '_> {
             Some(t) => Some(number(t, 0, max, "The space's advance")?),
             None => None,
         };
+        let covers = match header.option("covers") {
+            Some(t) => Some((coverage(t)?, t)),
+            None => None,
+        };
         let name = header.name;
         header.finish(
             "font",
-            "`height=`, `baseline=`, `line_height=`, `spacing=` or `space=`",
+            "`height=`, `baseline=`, `line_height=`, `spacing=`, `space=` or `covers=`",
         )?;
 
         let mut glyphs: Vec<Glyph> = Vec::new();
@@ -93,6 +97,29 @@ impl<'a> Parser<'a, '_> {
                 ),
             ));
             complete = false;
+        }
+        if let Some((required, token)) = covers {
+            let missing: Vec<char> = required
+                .into_iter()
+                .filter(|c| !glyphs.iter().any(|g| g.ch == *c))
+                .collect();
+            if !missing.is_empty() {
+                let listed: Vec<String> = missing
+                    .iter()
+                    .map(|&c| format!("`{c}` (U+{:04X})", c as u32))
+                    .collect();
+                self.errors.push(token.error(
+                    ErrorCode::UnknownName,
+                    format!(
+                        "Font `{}` has no glyph for {} of the characters that `covers={}` requires: {}",
+                        name.text,
+                        missing.len(),
+                        token.text,
+                        listed.join(", ")
+                    ),
+                ));
+                complete = false;
+            }
         }
         if complete {
             self.fonts.push((
@@ -247,6 +274,34 @@ impl<'a> Parser<'a, '_> {
         }
         out
     }
+}
+
+/// The characters of the sets named in `covers=`: `ascii` (printable ASCII, U+0020 to
+/// U+007E), `latin1` (U+00A0 to U+00FF) and `spanish` (the letters and marks that
+/// Spanish adds to ASCII), separated by commas.
+fn coverage(token: Token) -> Parsed<Vec<char>> {
+    let mut chars: Vec<char> = Vec::new();
+    for set in token.text.split(',') {
+        let more: Vec<char> = match set {
+            "ascii" => (' '..='~').collect(),
+            "latin1" => ('\u{a0}'..='\u{ff}').collect(),
+            "spanish" => "áéíóúüñÁÉÍÓÚÜÑ¿¡".chars().collect(),
+            _ => {
+                return Err(token.error(
+                    ErrorCode::Syntax,
+                    format!(
+                        "Unknown character set `{set}`; expected `ascii`, `latin1` or `spanish`"
+                    ),
+                ));
+            }
+        };
+        for c in more {
+            if !chars.contains(&c) {
+                chars.push(c);
+            }
+        }
+    }
+    Ok(chars)
 }
 
 /// A glyph's character: itself, or `U+` and 4 to 6 hexadecimal digits.

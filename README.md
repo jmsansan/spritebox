@@ -399,12 +399,15 @@ tilemap level tileset=ground
 
 ![The preview sheet of examples/font.spritebox](https://raw.githubusercontent.com/jmsansan/spritebox/main/docs/font-preview.png)
 
-`font NAME height=H [baseline=B] [line_height=L] [spacing=S] [space=N]`, then a
+`font NAME height=H [baseline=B] [line_height=L] [spacing=S] [space=N] [covers=SETS]`,
+then a
 `glyph` for each character, with rows of `#` (ink) and `.` (none):
 
 ```text
-font hud height=7 baseline=7 line_height=9 space=3
+font hud height=11 baseline=9 line_height=13 space=3 covers=ascii,spanish
   glyph A
+    .....
+    .....
     .###.
     #...#
     #...#
@@ -412,14 +415,20 @@ font hud height=7 baseline=7 line_height=9 space=3
     #...#
     #...#
     #...#
-  glyph U+003B advance=2   ; `;` starts comments, so write it by its code
-    .
-    #
-    .
-    .
-    #
-    #
-    .
+    .....
+    .....
+  glyph U+003B             ; `;` starts comments, so write it by its code
+    ..
+    ..
+    ..
+    ..
+    .#
+    ..
+    ..
+    .#
+    #.
+    ..
+    ..
 ```
 
 - **Metrics.** Every glyph has `height` rows; their widths may differ. `baseline` is
@@ -430,6 +439,11 @@ font hud height=7 baseline=7 line_height=9 space=3
   Without a glyph for the space, the font gets one whose advance is `space`
   (default half the height, rounded up).
 - **Characters** are written as themselves, or as `U+` and 4 to 6 hexadecimal digits.
+- **Coverage.** `covers=ascii,spanish` makes `check` report every character of those
+  sets that has no glyph. The sets are `ascii` (printable ASCII, U+0020 to U+007E),
+  `latin1` (U+00A0 to U+00FF) and `spanish` (á é í ó ú ü ñ Á É Í Ó Ú Ü Ñ ¿ ¡).
+  [examples/font.spritebox](examples/font.spritebox) covers ASCII and Spanish: 11
+  pixels tall, with 2 rows for accents above the capitals and 2 for descenders.
 
 `Font::render` draws text, with `\n` for new lines, and `Font::to_ttf` writes the font
 as **TrueType**:
@@ -438,16 +452,23 @@ as **TrueType**:
   an edge, with corners only: outer contours clockwise, holes counter-clockwise, and
   pixels that touch only at a corner in separate contours. `Font::outline` returns it.
 - **Metrics.** The em is the glyph height, at 128 font units a pixel (fewer for fonts
-  taller than 128 pixels or glyphs wider than 250), so the font is crisp at integer
-  multiples of its pixel size: a 7-pixel font drawn at 14 or 21 pixels.
+  taller than 128 pixels or glyphs wider than 250). Ascent is the rows above the
+  baseline, descent the rows below, and the line gap `line_height - height`; advances
+  are the glyphs'.
+- **Crisp sizes.** Draw the font at a whole multiple of its height in pixels: an
+  11-pixel font at 11, 22 or 33 pixels (`PxScale::from(22.0)` in `ab_glyph`), with the
+  pen on whole pixels. Every font pixel is then a whole square of screen pixels.
 - **Tables.** The ten tables TrueType requires: `cmap` (formats 4 and, beyond the
   Basic Multilingual Plane, 12), `glyf`, `loca`, `head`, `hhea`, `hmtx`, `maxp`,
   `name`, `OS/2` (version 4) and `post`. Glyph 0, `.notdef`, is a hollow box. There
   is no hinting and no kerning, and the file holds no time stamp, so the same font
   gives the same bytes.
-- **Checked.** The tests read the file back table by table, and with
-  `SPRITEBOX_FONT_TESTS=1`, FreeType (`fc-scan`) reads it and macOS Core Text draws
-  every glyph exactly as its grid.
+- **Checked.** The tests read the file back table by table. With
+  `SPRITEBOX_FONT_TESTS=1`, FreeType (`fc-scan`) reads it and finds Spanish covered,
+  and macOS Core Text draws every glyph exactly as its grid. `cargo run --manifest-path
+  scripts/ab-glyph-check/Cargo.toml` loads it with `ab_glyph`, as Diamon's
+  `FontLibrary` does, and checks every glyph at 1×, 2× and 3×: each pixel is fully
+  covered or not at all.
 
 ## Output
 
@@ -550,7 +571,7 @@ and `Export::to_json` adds `tilesets`, `tilemaps` and `fonts` to the atlas's JSO
     }
   },
   "fonts": {
-    "hud": {"file": "font-hud.ttf", "height": 7, "baseline": 7, "line_height": 9, "units_per_pixel": 128}
+    "hud": {"file": "font-hud.ttf", "height": 11, "baseline": 9, "line_height": 13, "units_per_pixel": 128}
   }
 ```
 

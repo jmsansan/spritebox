@@ -69,17 +69,21 @@ font tiny height=3 baseline=2 line_height=5 spacing=2
 #[test]
 fn text() {
     let font = hud();
-    assert_eq!(font.measure("AB"), (12, 7));
-    assert_eq!(font.measure("A\nBB"), (12, 16));
+    assert_eq!(font.measure("AB"), (12, 11));
+    assert_eq!(font.measure("A\nBB"), (12, 24));
     let image = font.render("A1", Color::WHITE).unwrap();
-    assert_eq!((image.width(), image.height()), (10, 7));
-    assert_eq!(image.pixel(1, 0), Some(Color::WHITE));
+    assert_eq!((image.width(), image.height()), (10, 11));
+    assert_eq!(
+        image.pixel(1, 2),
+        Some(Color::WHITE),
+        "capitals start below the accent rows"
+    );
     assert_eq!(image.pixel(0, 0), Some(Color::TRANSPARENT));
     // `1` starts after `A`'s advance of 6.
-    assert_eq!(image.pixel(7, 0), Some(Color::WHITE));
+    assert_eq!(image.pixel(7, 2), Some(Color::WHITE));
     // Characters without a glyph are drawn as `?`.
     assert_eq!(
-        font.render("~", Color::WHITE).unwrap(),
+        font.render("€", Color::WHITE).unwrap(),
         font.render("?", Color::WHITE).unwrap()
     );
 }
@@ -419,6 +423,7 @@ fn ttf_tables_outlines_and_metrics() {
         "typographic ascender"
     );
     assert_eq!(i16_at(os2, 88), 7 * u, "cap height: the top of `H`");
+    assert_eq!(i16_at(os2, 86), 5 * u, "x-height: the top of `x`");
     assert_eq!(u32_at(ttf.table(b"post"), 0), 0x0003_0000);
     assert_eq!(ttf.name(1), "hud");
     assert_eq!(ttf.name(2), "Regular");
@@ -437,7 +442,7 @@ fn ttf_tables_outlines_and_metrics() {
         assert_eq!(ttf.contours(id), expected, "{:?}", glyph.char());
         assert_eq!(ttf.advance(id), glyph.advance() * u as u32);
     }
-    assert_eq!(ttf.glyph_id('~'), 0, "no glyph: .notdef");
+    assert_eq!(ttf.glyph_id('€'), 0, "no glyph: .notdef");
     assert!(!ttf.contours(0).is_empty(), ".notdef is drawn");
     // The same font gives the same bytes.
     assert_eq!(font.to_ttf(&TtfOptions::default()).unwrap(), bytes);
@@ -586,17 +591,23 @@ fn other_font_engines_read_the_font() {
     let text = String::from_utf8_lossy(&scan.stdout);
     assert!(text.contains("family: \"hud\""), "{text}");
     assert!(text.contains("fontformat: \"TrueType\""), "{text}");
-    // Space, ! ' ( ) + , - . / 0-9 : ? A-Z.
+    // Printable ASCII, and ¡ ¿ Á É Í Ñ Ó Ú Ü á é í ñ ó ú ü.
     assert!(
-        text.contains("0000: 00000000 87fffb83 07fffffe 00000000"),
+        text.contains(
+            "0000: 00000000 ffffffff ffffffff 7fffffff 00000000 80000002 140a2202 140a2202"
+        ),
         "{text}"
+    );
+    assert!(
+        text.contains("lang: es|"),
+        "FreeType finds Spanish covered: {text}"
     );
 
     if cfg!(target_os = "macos") {
         let chars: String = font.glyphs().iter().map(|g| g.char()).collect();
         let script = concat!(env!("CARGO_MANIFEST_DIR"), "/scripts/check-ttf.swift");
         let out = std::process::Command::new("swift")
-            .args([script, path.to_str().unwrap(), "7", "7", "4", &chars])
+            .args([script, path.to_str().unwrap(), "11", "9", "4", &chars])
             .output()
             .expect("swift runs");
         let text = String::from_utf8_lossy(&out.stdout);
@@ -644,7 +655,7 @@ fn export_and_preview() {
     );
     let json = export.to_json();
     assert!(json.ends_with(
-        "  \"fonts\": {\n    \"hud\": {\n      \"file\": \"font-hud.ttf\",\n      \"height\": 7,\n      \"baseline\": 7,\n      \"line_height\": 9,\n      \"units_per_pixel\": 128\n    }\n  }\n}\n"
+        "  \"fonts\": {\n    \"hud\": {\n      \"file\": \"font-hud.ttf\",\n      \"height\": 11,\n      \"baseline\": 9,\n      \"line_height\": 13,\n      \"units_per_pixel\": 128\n    }\n  }\n}\n"
     ), "{json}");
     let sheet = doc.preview(&spritebox::PreviewOptions::default()).unwrap();
     let sum = sheet
@@ -655,7 +666,44 @@ fn export_and_preview() {
         });
     assert_eq!(
         (sheet.width(), sheet.height(), sum),
-        (594, 152, 0x56e7_ac58_e028_cfa0),
+        (554, 340, 0xb1df_998b_71de_5c21),
         "{sum:#018x}"
     );
+}
+
+#[test]
+fn coverage_is_checked() {
+    // The example font covers printable ASCII and Spanish.
+    let font = hud();
+    for c in (' '..='~').chain("áéíóúüñÁÉÍÓÚÜÑ¿¡".chars()) {
+        assert!(font.glyph(c).is_some(), "{c:?}");
+    }
+    let found = check(
+        "font f height=1 covers=spanish\n  glyph ñ\n    #\n",
+        &Limits::default(),
+    );
+    assert_eq!(found.len(), 1);
+    let e = &found[0];
+    assert_eq!(e.code, UnknownName);
+    assert_eq!(
+        (e.position.unwrap().line, e.position.unwrap().column),
+        (1, 24)
+    );
+    assert!(e.message.contains("15 of the characters"), "{}", e.message);
+    assert!(e.message.contains("`á` (U+00E1)"), "{}", e.message);
+    assert!(!e.message.contains("`ñ`"), "{}", e.message);
+    assert_eq!(error("font f height=1 covers=greek\n"), (1, 24, Syntax));
+    // The space that a font gets without writing one counts.
+    let text: String = std::iter::once("font f height=1 covers=ascii".to_owned())
+        .chain(('!'..='~').map(|c| {
+            let name = if c == ';' {
+                "U+003B".to_owned()
+            } else {
+                c.to_string()
+            };
+            format!("  glyph {name}\n    #")
+        }))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(check(&text, &Limits::default()).is_empty());
 }

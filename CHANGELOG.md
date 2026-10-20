@@ -33,6 +33,8 @@
   of keys, autotiling with `outside=same|empty`, and solid tiles.
 - `Document::export`: the atlas, a texture for each tileset, the tilemaps, and their
   metadata in one JSON file.
+- `covers=ascii,latin1,spanish` on a font: `check` reports the glyphs it lacks. The
+  example font covers printable ASCII and Spanish.
 - Pixel fonts: glyph grids with an advance, a baseline and a line height; text drawn
   with them; and TrueType export whose outlines are the pixels as squares, merged
   where they share an edge, with the em at the glyph height.
