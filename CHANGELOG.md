@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Procedural textures: `texture NAME WxH seed=N` with `noise` (seeded value noise
+  that wraps, in octaves), a `ramp` of palette keys and ordered `dither`ing. A
+  texture is a sprite, so it serves as a layer, a tile, a terrain's piece or a frame.
+  `Noise`, `Dither` and `bayer` are public.
+
+### Fixed
+
+- On Windows, the command-line tool printed imported files' paths with mixed
+  separators.
+
 ## 0.1.0
 
 First release: the art of a 2D game as plain text, from palettes to TrueType fonts,

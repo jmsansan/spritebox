@@ -1,0 +1,93 @@
+; Procedural textures: seeded noise drawn with a ramp of palette keys, used as
+; sprites, layers and tiles. The same seed gives the same pixels everywhere, and
+; textures wrap, so they tile with themselves.
+
+palette ground
+  .  transparent
+  k  #1a1c2c
+  G  #a7f070   ; grass, light to dark
+  g  #38b764
+  h  #257179
+  s  #94b0c2   ; stone
+  S  #566c86
+  T  #333c57
+  d  #b86f50   ; dirt
+  D  #7a4841
+  c  #73eff7   ; sky
+  C  #41a6f6
+  B  #3b5dc9
+  w  #f4f4f4
+
+texture grass 16x16 palette=ground seed=7
+  noise cell=8 octaves=3 roughness=60
+  ramp h g g G
+  dither bayer4
+
+texture stone 16x16 palette=ground seed=21
+  noise cell=4 octaves=2
+  ramp T S S s
+  dither bayer2
+
+texture sky 32x16 palette=ground seed=3
+  noise cell=16 octaves=2 roughness=40
+  ramp B C C c w
+  dither bayer8
+
+texture dirt 8x8 palette=ground seed=11
+  noise cell=4 octaves=2
+  ramp D d d
+  dither bayer4
+
+; A texture as a layer: a stone block with a dark rim drawn over it.
+sprite block 16x16 palette=ground
+  layer face = stone
+  layer rim
+    kkkkkkkkkkkkkkkk
+    k..............k
+    k..............k
+    k..............k
+    k..............k
+    k..............k
+    k..............k
+    k..............k
+    k..............k
+    k..............k
+    k..............k
+    k..............k
+    k..............k
+    k..............k
+    k..............k
+    kkkkkkkkkkkkkkkk
+
+; Textures as tiles, and as the fill of an autotiled terrain.
+tileset ground 8x8 palette=ground
+  tile dirt = dirt
+  terrain soil 16
+    island
+      .kkkkkk.
+      kGGGGGGk
+      kggggggk
+      kddddddk
+      kddDdddk
+      kdddddDk
+      kddddddk
+      .kkkkkk.
+    h_strip
+      kkkkkkkk
+      GGGGGGGG
+      gggggggg
+      dddddddd
+      ddDddddD
+      dddddDdd
+      dddddddd
+      kkkkkkkk
+    v_strip
+      kddddddk
+      kddDdddk
+      kddddddk
+      kdddddDk
+      kddddddk
+      kdDddddk
+      kddddddk
+      kddddddk
+    fill = dirt

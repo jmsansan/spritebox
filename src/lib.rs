@@ -1,7 +1,7 @@
 //! 2D pixel art as plain text, in safe Rust with zero dependencies.
 //!
-//! A spritebox file defines palettes, sprites, animations, tilesets, tilemaps and
-//! pixel fonts as text that a person or an AI assistant can write, read and diff. The crate
+//! A spritebox file defines palettes, sprites, procedural textures, animations,
+//! tilesets, tilemaps and pixel fonts as text that a person or an AI assistant can write, read and diff. The crate
 //! validates it with exact diagnostics, renders it to RGBA8 images and PNG files, and
 //! draws preview sheets to review a whole file at a glance. The same text gives the same pixels on every
 //! platform.
@@ -83,6 +83,18 @@
 //!     ...
 //!   layer shadow = blob:offset(1,1)
 //! ```
+//!
+//! ## Procedural textures
+//!
+//! ```text
+//! texture grass 16x16 palette=dawn seed=7
+//!   noise cell=8 octaves=3 roughness=60
+//!   ramp h g g G
+//!   dither bayer4
+//! ```
+//!
+//! Seeded value [`Noise`] that wraps, mapped onto a ramp of keys with [`Dither`]; a
+//! texture is a sprite, usable as a layer, a tile or anything else a sprite is.
 //!
 //! ## Derived sprites
 //!
@@ -180,6 +192,7 @@ pub mod png;
 mod preview;
 mod sprite;
 mod text;
+mod texture;
 mod tiles;
 mod ttf;
 
@@ -192,4 +205,5 @@ pub use image::{Color, Image};
 pub use limits::Limits;
 pub use preview::PreviewOptions;
 pub use sprite::{Insets, Palette, Sprite};
+pub use texture::{Dither, Noise, bayer};
 pub use tiles::{BLOB_MASKS, Piece, Scheme, Terrain, Tilemap, Tileset, neighbours, reduce};
