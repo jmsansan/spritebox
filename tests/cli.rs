@@ -115,23 +115,43 @@ fn render_writes_files() {
         dir.to_str().unwrap(),
         "--scale",
         "2",
+        "--padding",
+        "2",
+        "--extrude",
         "--json",
     ]);
     assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
     let json = stdout(&out);
-    for name in [
-        "preview.png",
-        "sprites/coin.png",
-        "sprites/coin_dusk.png",
-        "sprites/gem.png",
-    ] {
-        let path = dir.join(name);
-        assert!(json.contains(&path.display().to_string()), "{json}");
-        let image = spritebox::png::read_file(&path).unwrap();
-        assert!(image.width() > 0);
+    for name in ["atlas.png", "spritebox.json", "preview.png"] {
+        assert!(
+            json.contains(&dir.join(name).display().to_string()),
+            "{json}"
+        );
     }
-    let coin = spritebox::png::read_file(dir.join("sprites/coin.png")).unwrap();
-    assert_eq!((coin.width(), coin.height()), (8, 8));
+    let doc = spritebox::Document::parse(&std::fs::read_to_string(COIN).unwrap()).unwrap();
+    let options = spritebox::AtlasOptions {
+        padding: 2,
+        extrude: true,
+    };
+    let atlas = doc.atlas(&options).unwrap();
+    assert_eq!(
+        spritebox::png::read_file(dir.join("atlas.png")).unwrap(),
+        atlas.image
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.join("spritebox.json")).unwrap(),
+        atlas.to_json("atlas.png")
+    );
+    let preview = doc
+        .preview(&spritebox::PreviewOptions {
+            scale: 2,
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(
+        spritebox::png::read_file(dir.join("preview.png")).unwrap(),
+        preview
+    );
     std::fs::remove_dir_all(dir).unwrap();
 }
 
@@ -158,6 +178,8 @@ fn usage_and_io_errors() {
         &["render", COIN, "--out"],
         &["render", COIN, "--out", "x", "--scale", "0"],
         &["check", COIN, "--out", "x"],
+        &["check", COIN, "--extrude"],
+        &["render", COIN, "--out", "x", "--padding", "65"],
     ] {
         let out = spritebox(args);
         assert_eq!(out.status.code(), Some(2), "{args:?}");

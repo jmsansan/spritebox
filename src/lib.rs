@@ -109,13 +109,17 @@
 //! # Output
 //!
 //! [`Sprite::render`] gives an [`Image`]: RGBA8 pixels, sRGB-encoded and not
-//! premultiplied, tightly packed, top row first. [`png`] encodes and decodes PNG
-//! files, and [`Document::preview`] draws a preview sheet.
+//! premultiplied, tightly packed, top row first. [`Document::atlas`] packs every
+//! sprite into one texture, with each one's [`Rect`] and the animations' frames, as
+//! structs and as JSON. [`png`] encodes and decodes PNG files, and
+//! [`Document::preview`] draws a preview sheet.
 #![forbid(unsafe_code)]
 
+mod atlas;
 mod document;
 mod error;
 mod image;
+mod json;
 mod label;
 mod limits;
 pub mod png;
@@ -123,6 +127,7 @@ mod preview;
 mod sprite;
 mod text;
 
+pub use atlas::{Atlas, AtlasAnimation, AtlasFrame, AtlasOptions, Rect, Region};
 pub use document::{Animation, Document, Frame, check};
 pub use error::{Error, ErrorCode, Position, Result};
 pub use image::{Color, Image};

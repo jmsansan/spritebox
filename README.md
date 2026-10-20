@@ -5,7 +5,7 @@
 
 **2D pixel art as plain text, in safe Rust with zero dependencies: palettes, sprites
 and animations written as text, validated with exact diagnostics, and rendered to
-RGBA images, PNG files and preview sheets.**
+RGBA images, PNG files, atlases with their metadata, and preview sheets.**
 
 No C libraries, build scripts or `unsafe`: only the standard library, with its own
 PNG encoder and decoder, DEFLATE, CRC-32 and Adler-32. The same text gives the same
@@ -29,9 +29,9 @@ which does the same for game audio.
 | Animations: frames with ticks, looping or once | Available |
 | Diagnostics with line, column and stable code; all errors at once | Available |
 | RGBA8 output, PNG writing and reading | Available |
+| Atlases: packed sprites and frames with padding; metadata as Rust structs and JSON | Available |
 | Preview sheets | Available (sprites, animations) |
 | Command-line tool: `check`, `render` | Available |
-| Atlas packing with metadata as Rust structs and JSON | Planned |
 | Tilesets with 16- and 47-variant autotiling, tilemaps with solid tiles | Planned |
 | Pixel fonts with TrueType export | Planned |
 | Seeded procedural textures: value noise and ordered dithering | Planned |
@@ -49,29 +49,16 @@ Rust 1.85 or newer. The command-line tool installs with
 ## Example
 
 ```rust
-use spritebox::{Document, PreviewOptions, png};
+use spritebox::{AtlasOptions, Document, PreviewOptions, png};
 
-fn coin() -> spritebox::Result<()> {
-    let document: Document = "
-palette dawn
-  .  transparent
-  k  #1a1c2c
-  o  #f4b41b
-  y  #ffe478
-  w  #ffffff
-
-sprite coin 8x8 palette=dawn
-  ..kkkk..
-  .kooyyk.
-  kooyywok
-  kooyyook
-  kooooook
-  koooooyk
-  .koooyk.
-  ..kkkk..
-".parse()?;
-    let coin = document.sprite("coin").unwrap().render(); // RGBA8, 8x8
-    png::write_file("coin.png", &coin)?;
+fn build_art(text: &str) -> spritebox::Result<()> {
+    let document: Document = text.parse()?;
+    // One texture with every sprite and frame, and where each one is.
+    let atlas = document.atlas(&AtlasOptions::default())?;
+    png::write_file("atlas.png", &atlas.image)?;
+    std::fs::write("spritebox.json", atlas.to_json("atlas.png"))?;
+    let coin = atlas.region("coin").unwrap(); // Rect { x, y, width, height } in texels
+    // A sheet with everything, scaled up and labelled, to review at a glance.
     let sheet = document.preview(&PreviewOptions::default())?;
     png::write_file("preview.png", &sheet)
 }
@@ -258,6 +245,56 @@ It returns RGBA8, rounding 16-bit samples and ignoring gamma and color-space chu
 It checks CRCs and rejects unknown critical chunks. Compatibility is tested against
 files written by FFmpeg and macOS Image I/O, and FFmpeg reads the crate's files.
 
+**Atlases.** `Document::atlas` packs every sprite, and every sprite that animation
+frames build, into one texture. Each sprite gets `padding` empty pixels on every
+side (1 by default, so neighbors are 2 apart), which prevents bleeding with nearest
+sampling; `extrude` fills the padding with copies of edge pixels, for linear
+sampling. Sprites with identical pixels share one rectangle. Packing is a skyline,
+tallest first, trying several widths and keeping the smallest area; it depends only
+on the sprites, so the same file gives the same atlas.
+
+The `Atlas` holds the image, each sprite's `Rect` in texels, and the animations with
+each frame's rectangle and ticks. `Atlas::to_json` writes the same as JSON; for
+`examples/showcase.spritebox`, in part:
+
+```json
+{
+  "format": "spritebox",
+  "version": 1,
+  "atlas": {
+    "image": "atlas.png",
+    "size": [30, 60],
+    "padding": 1,
+    "sprites": {
+      "coin": [1, 31, 8, 8],
+      "coin_edge": [1, 41, 8, 8],
+      "coin_edge:flip_x": [1, 51, 8, 8]
+    }
+  },
+  "animations": {
+    "coin_spin": {
+      "loop": true,
+      "frames": [
+        {"sprite": "coin", "rect": [1, 31, 8, 8], "ticks": 6},
+        {"sprite": "coin_edge", "rect": [1, 41, 8, 8], "ticks": 6},
+        {"sprite": "coin_edge:flip_x", "rect": [1, 51, 8, 8], "ticks": 6}
+      ]
+    }
+  }
+}
+```
+
+- Rectangles are `[x, y, width, height]` in texels from the top-left corner.
+- `sprites` lists the named sprites in the order defined, then the frame sprites
+  in the order first used. Objects keep that order.
+- `version` changes only when a change would break a reader; new members may be
+  added without one.
+
+**For Diamon.** Register `atlas.image` with `TextureStore::register` under a URI,
+with nearest sampling. A sprite's `Rect` is the `region` of `diamon.sprite2d`, and
+an animation's frames, a rectangle and ticks each, are a clip of
+`diamon.sprite_animation2d`; `looping` says whether it loops.
+
 **Preview sheets.** `Document::preview` draws every sprite, and every animation's
 frames in a row with their ticks, scaled up by an integer factor (4 by default), on a
 checkerboard that shows transparency, with lines between pixels, labelled with names,
@@ -267,13 +304,15 @@ sizes and ticks in a small built-in pixel font.
 
 ```text
 spritebox check <file> [--json]
-spritebox render <file> --out <dir> [--scale <n>] [--json]
+spritebox render <file> --out <dir> [--scale <n>] [--padding <n>] [--extrude] [--json]
 ```
 
 - `check` validates a file and prints every diagnostic, as
   `file:line:column: error[code]: message` on standard error, or as JSON.
-- `render` validates a file, then writes `preview.png` and `sprites/<name>.png`
-  to `<dir>`. Nothing is written when the file has errors.
+- `render` validates a file, then writes `atlas.png`, its metadata
+  `spritebox.json`, and `preview.png` to `<dir>`. Nothing is written when the file
+  has errors. `--scale` sets the preview's scale, and `--padding` and `--extrude`
+  the atlas's.
 - `<file>` may be `-` for standard input.
 
 Exit statuses are stable: **0** success, **1** the file has errors, **2** bad usage,
@@ -336,8 +375,10 @@ fn parse_trusted(text: &str) -> spritebox::Result<Document> {
 
 ## Limitations
 
-- No atlases, tilesets, tilemaps, fonts or procedural textures yet; see the
-  capability table for what comes next.
+- No tilesets, tilemaps, fonts or procedural textures yet; see the capability table
+  for what comes next.
+- An atlas is one texture; when the sprites do not fit within
+  `Limits::max_image_side`, building it fails rather than spilling into a second.
 - Color is sRGB throughout, and alpha is composited in sRGB with integer arithmetic.
   There is no color management: gamma, ICC and `sRGB` chunks of PNG input are ignored.
 - The PNG encoder writes no interlaced, 16-bit, grayscale or metadata chunks, and the

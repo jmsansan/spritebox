@@ -5,7 +5,7 @@ use std::io::Read as _;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use spritebox::{Document, Error, ErrorCode, Limits, Position, PreviewOptions, png};
+use spritebox::{AtlasOptions, Document, Error, ErrorCode, Limits, Position, PreviewOptions, png};
 
 const USAGE: &str = "\
 spritebox: 2D pixel art as plain text
@@ -13,8 +13,9 @@ spritebox: 2D pixel art as plain text
 Usage:
   spritebox check <file> [--json]
       Validate a file and print its diagnostics.
-  spritebox render <file> --out <dir> [--scale <n>] [--json]
-      Validate a file, then write preview.png and sprites/<name>.png to <dir>.
+  spritebox render <file> --out <dir> [--scale <n>] [--padding <n>] [--extrude] [--json]
+      Validate a file, then write atlas.png, spritebox.json (the atlas's
+      metadata) and preview.png to <dir>.
 
 <file> may be `-` for standard input.
 
@@ -22,6 +23,8 @@ Options:
   --json        Print diagnostics as JSON on standard output.
   --out <dir>   Directory for output files; created if missing.
   --scale <n>   Pixels per sprite pixel in the preview, 1..=64 (default 4).
+  --padding <n> Empty pixels around each sprite in the atlas, 0..=64 (default 1).
+  --extrude     Fill the atlas padding with copies of edge pixels.
   -h, --help    Print this help.
   -V, --version Print the version.
 
@@ -37,6 +40,7 @@ struct Options {
     file: String,
     out: Option<PathBuf>,
     scale: u32,
+    atlas: AtlasOptions,
     json: bool,
 }
 
@@ -70,6 +74,7 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
     let mut file = None;
     let mut out = None;
     let mut scale = PreviewOptions::default().scale;
+    let mut atlas = AtlasOptions::default();
     let mut json = false;
     while let Some(arg) = iter.next() {
         match arg.as_str() {
@@ -83,6 +88,15 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
                     .filter(|s| (1..=64).contains(s))
                     .ok_or(format!("--scale must be 1..=64, not `{value}`"))?;
             }
+            "--padding" => {
+                let value = iter.next().ok_or("--padding needs a number")?;
+                atlas.padding = value
+                    .parse()
+                    .ok()
+                    .filter(|p| *p <= 64)
+                    .ok_or(format!("--padding must be 0..=64, not `{value}`"))?;
+            }
+            "--extrude" => atlas.extrude = true,
             _ if arg.starts_with("--") => return Err(format!("unknown option `{arg}`")),
             _ if file.is_none() => file = Some(arg.clone()),
             _ => return Err(format!("unexpected argument `{arg}`")),
@@ -95,11 +109,15 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
     if command == "check" && out.is_some() {
         return Err("check writes no files; --out is for render".into());
     }
+    if command == "check" && atlas != AtlasOptions::default() {
+        return Err("--padding and --extrude are for render".into());
+    }
     Ok(Options {
         command,
         file,
         out,
         scale,
+        atlas,
         json,
     })
 }
@@ -123,7 +141,7 @@ fn run(options: &Options) -> ExitCode {
         Err(error) => return report(options, &[error], &[], EXIT_INVALID),
     };
     let out = options.out.as_deref().unwrap_or(Path::new("."));
-    match render(&document, out, options.scale, &limits) {
+    match render(&document, out, options, &limits) {
         Ok(written) => report(options, &[], &written, 0),
         Err(error) => {
             let status = if error.code == ErrorCode::Io {
@@ -165,34 +183,42 @@ fn read_input(file: &str) -> Result<Result<String, Error>, Error> {
     }))
 }
 
+/// The files that `render` writes, in this order.
+const ATLAS: &str = "atlas.png";
+const METADATA: &str = "spritebox.json";
+const PREVIEW: &str = "preview.png";
+
 fn render(
     document: &Document,
     out: &Path,
-    scale: u32,
+    options: &Options,
     limits: &Limits,
 ) -> Result<Vec<PathBuf>, Error> {
+    // Everything is made before anything is written.
+    let atlas = document.atlas_with(&options.atlas, limits)?;
+    let preview = document.preview_with(
+        &PreviewOptions {
+            scale: options.scale,
+            ..PreviewOptions::default()
+        },
+        limits,
+    )?;
+    let files = [
+        (ATLAS, png::encode(&atlas.image)),
+        (METADATA, atlas.to_json(ATLAS).into_bytes()),
+        (PREVIEW, png::encode(&preview)),
+    ];
     let io = |path: &Path, e: std::io::Error| {
         Error::new(
             ErrorCode::Io,
             format!("Cannot write {}: {e}", path.display()),
         )
     };
-    let sprites = out.join("sprites");
-    std::fs::create_dir_all(&sprites).map_err(|e| io(&sprites, e))?;
+    std::fs::create_dir_all(out).map_err(|e| io(out, e))?;
     let mut written = Vec::new();
-    let preview = document.preview_with(
-        &PreviewOptions {
-            scale,
-            ..PreviewOptions::default()
-        },
-        limits,
-    )?;
-    let path = out.join("preview.png");
-    std::fs::write(&path, png::encode(&preview)).map_err(|e| io(&path, e))?;
-    written.push(path);
-    for sprite in document.sprites() {
-        let path = sprites.join(format!("{}.png", sprite.name()));
-        std::fs::write(&path, sprite.render().to_png()).map_err(|e| io(&path, e))?;
+    for (name, bytes) in files {
+        let path = out.join(name);
+        std::fs::write(&path, bytes).map_err(|e| io(&path, e))?;
         written.push(path);
     }
     Ok(written)
