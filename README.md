@@ -7,7 +7,8 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 **2D pixel art as plain text, in safe Rust with zero dependencies: palettes, sprites,
-animations, autotiled tilesets, tilemaps and pixel fonts written as text, validated
+procedural textures, animations, autotiled tilesets, tilemaps and pixel fonts written
+as text, validated
 with exact diagnostics, and rendered to RGBA images, PNG files, atlases with their
 metadata, TrueType fonts and preview sheets.**
 
@@ -41,7 +42,7 @@ which does the same for game audio.
 | Imports of other files through a loader; no file system needed | Available |
 | WebAssembly (`wasm32-unknown-unknown`) | Available |
 | Command-line tool: `check`, `render`, `font` | Available |
-| Seeded procedural textures: value noise and ordered dithering | Planned |
+| Seeded procedural textures: value noise and ordered dithering | Available |
 
 ## Install
 
@@ -226,6 +227,34 @@ sprite hero 16x16 palette=field
 Every layer has the sprite's size; a layer made from another sprite must have the
 same size and palette. Layers are composited with the "over" operator on sRGB values,
 in integer arithmetic, so translucent colors blend the same on every platform.
+
+### Procedural textures
+
+![The preview sheet of examples/textures.spritebox](https://raw.githubusercontent.com/jmsansan/spritebox/main/docs/textures-preview.png)
+
+`texture NAME WxH [palette=PALETTE] [seed=N]` draws seeded noise with a ramp of
+palette keys, for grass, stone, sky and the like:
+
+```text
+texture grass 16x16 palette=ground seed=7
+  noise cell=8 octaves=3 roughness=60
+  ramp h g g G        ; keys from low noise to high; repeat one to widen its band
+  dither bayer4       ; none (default), bayer2, bayer4 or bayer8
+```
+
+- **Noise.** Value noise: random values on a lattice of points `cell` pixels apart,
+  eased between them. Each further octave (1 to 8, default 1) halves the cell, and
+  weighs `roughness` percent (default 50) of the one before. The cell must divide
+  the width and the height, and the noise wraps around them, so a texture tiles
+  with itself without a seam.
+- **Seed.** `seed=` (default 0) picks the lattice values, through the crate's own
+  hash; the same seed gives the same pixels on every platform.
+- **Ramp.** The noise is stretched to its full range, then mapped onto the keys.
+  `dither none` takes the nearest key; `bayer2`, `bayer4` and `bayer8` mix
+  neighboring keys in an ordered pattern, in proportion to where the value falls.
+- **A texture is a sprite.** Use it as one, as a layer (`layer face = stone`), a
+  tile (`tile dirt = dirt`), a terrain's piece (`fill = dirt`), the start of a
+  modifier chain (`grass:flip_x`) or an animation frame.
 
 ### Derived sprites and modifiers
 
@@ -745,7 +774,6 @@ fn parse_trusted(text: &str) -> spritebox::Result<Document> {
 
 What spritebox does not do, as of this release:
 
-- No procedural textures (seeded noise and dithering) yet; they are planned.
 - No drawing tools or editor: art is text, reviewed through preview sheets.
 - Fonts are one weight and style, without kerning, ligatures or hinting; outlines
   are exact squares, so they are crisp at integer multiples of the pixel size and

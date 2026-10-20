@@ -194,3 +194,17 @@ fn golden_tiles() {
         "{sums:#018x?}"
     );
 }
+
+#[test]
+fn golden_textures() {
+    let doc: Document = include_str!("../examples/textures.spritebox")
+        .parse()
+        .unwrap();
+    let sheet = doc.preview(&PreviewOptions::default()).unwrap();
+    assert_eq!(
+        checksum(&sheet),
+        0xee68_0f6f_e391_11a8,
+        "{:#018x}",
+        checksum(&sheet)
+    );
+}

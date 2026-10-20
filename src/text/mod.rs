@@ -6,6 +6,7 @@ mod font;
 mod import;
 mod lex;
 mod sprite;
+mod texture;
 mod tiles;
 
 use std::collections::HashMap;
@@ -20,7 +21,7 @@ use tiles::{TilemapDef, TilesetDef};
 
 /// The directives that start a definition.
 const DIRECTIVES: &str =
-    "`import`, `palette`, `sprite`, `animation`, `tileset`, `tilemap` or `font`";
+    "`import`, `palette`, `sprite`, `texture`, `animation`, `tileset`, `tilemap` or `font`";
 
 /// Parses `text`, loading the files it imports through `loader`. Returns the
 /// document, complete when there are no errors, and the errors ordered by file, then
@@ -287,6 +288,7 @@ impl<'a> Parser<'a, '_> {
             "tileset" => self.tileset(node),
             "tilemap" => self.tilemap(node),
             "font" => self.font(node),
+            "texture" => self.texture(node),
             other => Err(node.line.first().error(
                 ErrorCode::Syntax,
                 format!("Unknown directive `{other}`; expected {DIRECTIVES}"),

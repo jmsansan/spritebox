@@ -26,6 +26,13 @@ pub(crate) enum Body<'a> {
         complete: bool,
     },
     Derived(Chain<'a>),
+    /// Noise drawn with a ramp of keys.
+    Texture {
+        palette: Option<Token<'a>>,
+        noise: crate::Noise,
+        ramp: Vec<Token<'a>>,
+        dither: crate::Dither,
+    },
 }
 
 pub(crate) struct LayerDef<'a> {
@@ -44,6 +51,7 @@ impl SpriteDef<'_> {
     fn dependencies(&self) -> Vec<Token<'_>> {
         match &self.body {
             Body::Derived(chain) => vec![chain.base],
+            Body::Texture { .. } => Vec::new(),
             Body::Grid { layers, .. } => layers
                 .iter()
                 .filter_map(|l| match &l.source {
@@ -429,6 +437,12 @@ impl<'a> Parser<'a, '_> {
                 sprite.name = def.name.text.to_owned();
                 (sprite, depth)
             }),
+            Body::Texture {
+                palette,
+                noise,
+                ramp,
+                dither,
+            } => self.texture_sprite(def.name, *palette, noise, ramp, *dither, palettes),
             Body::Grid {
                 width,
                 height,
