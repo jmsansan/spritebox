@@ -48,7 +48,7 @@ which does the same for game audio.
 
 ```toml
 [dependencies]
-spritebox = "0.1"
+spritebox = "0.2"
 ```
 
 Rust 1.85 or newer. The command-line tool installs with
