@@ -16,7 +16,8 @@ spritebox: 2D pixel art as plain text
 Usage:
   spritebox check <file> [--json]
       Validate a file and print its diagnostics.
-  spritebox render <file> --out <dir> [--scale <n>] [--padding <n>] [--extrude] [--json]
+  spritebox render <file> --out <dir> [--scale <n>] [--padding <n>] [--no-extrude]
+                   [--max-side <n>] [--json]
       Validate a file, then write atlas.png, tileset-<name>.png for each
       tileset, font-<name>.ttf for each font, spritebox.json (the metadata)
       and preview.png to <dir>.
@@ -29,8 +30,9 @@ Options:
   --json        Print diagnostics as JSON on standard output.
   --out <dir>   Directory for output files; created if missing.
   --scale <n>   Pixels per sprite pixel in the preview, 1..=64 (default 4).
-  --padding <n> Empty pixels around each sprite in the atlas, 0..=64 (default 1).
-  --extrude     Fill the atlas padding with copies of edge pixels.
+  --padding <n> Pixels around each sprite and tile in textures, 0..=64 (default 1).
+  --no-extrude  Leave the padding transparent instead of copying edge pixels.
+  --max-side <n> The largest side of a texture, 1..=8192 (default 2048).
   --font <name> The font to write, when the file has several.
   --family <n>  The family name in the TrueType file (default: the font's name).
   -h, --help    Print this help.
@@ -108,7 +110,15 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
                     .filter(|p| *p <= 64)
                     .ok_or(format!("--padding must be 0..=64, not `{value}`"))?;
             }
-            "--extrude" => atlas.extrude = true,
+            "--no-extrude" => atlas.extrude = false,
+            "--max-side" => {
+                let value = iter.next().ok_or("--max-side needs a number")?;
+                atlas.max_side = value
+                    .parse()
+                    .ok()
+                    .filter(|p| (1..=8192).contains(p))
+                    .ok_or(format!("--max-side must be 1..=8192, not `{value}`"))?;
+            }
             "--font" => font = Some(iter.next().ok_or("--font needs a name")?.clone()),
             "--family" => family = Some(iter.next().ok_or("--family needs a name")?.clone()),
             _ if arg.starts_with("--") => return Err(format!("unknown option `{arg}`")),
@@ -127,7 +137,7 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
         return Err("check writes no files; --out is for render and font".into());
     }
     if command != "render" && atlas != AtlasOptions::default() {
-        return Err("--padding and --extrude are for render".into());
+        return Err("--padding, --no-extrude and --max-side are for render".into());
     }
     if command != "font" && (font.is_some() || family.is_some()) {
         return Err("--font and --family are for the font command".into());

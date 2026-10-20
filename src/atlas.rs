@@ -9,21 +9,42 @@ use crate::{Document, Error, Image, Limits, Result};
 /// How sprites are packed into an atlas.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AtlasOptions {
-    /// Empty pixels around each sprite, 0..=64: neighbors are `2 * padding` apart and
-    /// `padding` from the edges. Default 1, enough against bleeding with nearest
-    /// sampling.
+    /// Pixels around each sprite or tile, 0..=64: neighbors are `2 * padding` apart
+    /// and `padding` from the edges. Default 1. Use 0 for textures sampled only with
+    /// nearest filtering.
     pub padding: u32,
-    /// Fill the padding with copies of each sprite's edge pixels, against bleeding
-    /// with linear sampling. Default false.
+    /// Fill the padding with copies of each sprite's edge pixels, so that linear
+    /// filtering and mipmaps do not mix in transparent texels or neighbors. With
+    /// `false`, the padding is transparent. Default true.
     pub extrude: bool,
+    /// The largest width or height of a texture, 1..=[`Limits::max_image_side`].
+    /// Default 2048, the largest side that every WebGPU device supports. Art that does
+    /// not fit is an error, never a second texture.
+    pub max_side: u32,
 }
 
 impl Default for AtlasOptions {
     fn default() -> Self {
         Self {
             padding: 1,
-            extrude: false,
+            extrude: true,
+            max_side: 2048,
         }
+    }
+}
+
+impl AtlasOptions {
+    pub(crate) fn check(&self, limits: &Limits) -> Result<()> {
+        if self.padding > 64 {
+            return Err(Error::invalid("Atlas padding must be 0..=64"));
+        }
+        if self.max_side == 0 || self.max_side > limits.max_image_side {
+            return Err(Error::invalid(format!(
+                "The atlas's largest side must be 1..={}",
+                limits.max_image_side
+            )));
+        }
+        Ok(())
     }
 }
 
@@ -149,9 +170,7 @@ pub(crate) fn write_header(w: &mut Writer) {
 
 /// Packs the sprites of `document`.
 pub(crate) fn build(document: &Document, options: &AtlasOptions, limits: &Limits) -> Result<Atlas> {
-    if options.padding > 64 {
-        return Err(Error::invalid("Atlas padding must be 0..=64"));
-    }
+    options.check(limits)?;
     let sprites: Vec<_> = document
         .sprites
         .iter()
@@ -183,16 +202,18 @@ pub(crate) fn build(document: &Document, options: &AtlasOptions, limits: &Limits
         .iter()
         .map(|i| (i.width() + 2 * pad, i.height() + 2 * pad))
         .collect();
-    let (positions, width, height) = pack(&sizes);
+    let max = options.max_side;
+    let (positions, width, height) = pack(&sizes, max).ok_or_else(|| {
+        Error::limit(format!(
+            "The sprites do not fit in an atlas of {max}x{max} texels with padding {pad}; \
+             raise `max_side` or split the art"
+        ))
+    })?;
     let (width, height) = (width.max(1), height.max(1));
     Image::check_size(width, height, limits)?;
     let mut image = Image::blank(width, height);
     for (sprite, &(x, y)) in unique.iter().zip(&positions) {
-        let (sx, sy) = (x + pad, y + pad);
-        image.copy_from(sprite, sx as i64, sy as i64);
-        if options.extrude && pad > 0 {
-            extrude(&mut image, sprite, sx, sy, pad);
-        }
+        place(&mut image, sprite, x + pad, y + pad, pad, options.extrude);
     }
     let rect = |u: usize| Rect {
         x: positions[u].0 + pad,
@@ -240,8 +261,17 @@ pub(crate) fn build(document: &Document, options: &AtlasOptions, limits: &Limits
     })
 }
 
+/// Copies `sprite` to `(x, y)`, and its edge pixels outward into the padding when
+/// `extrude` is set.
+pub(crate) fn place(image: &mut Image, sprite: &Image, x: u32, y: u32, pad: u32, extrude: bool) {
+    image.copy_from(sprite, x as i64, y as i64);
+    if extrude && pad > 0 {
+        extrude_edges(image, sprite, x, y, pad);
+    }
+}
+
 /// Copies the edge pixels of the sprite at `(x, y)` outward into its padding.
-fn extrude(image: &mut Image, sprite: &Image, x: u32, y: u32, pad: u32) {
+fn extrude_edges(image: &mut Image, sprite: &Image, x: u32, y: u32, pad: u32) {
     let (w, h) = (sprite.width() as i64, sprite.height() as i64);
     for py in -(pad as i64)..h + pad as i64 {
         for px in -(pad as i64)..w + pad as i64 {
@@ -256,17 +286,18 @@ fn extrude(image: &mut Image, sprite: &Image, x: u32, y: u32, pad: u32) {
     }
 }
 
-/// Packs rectangles of `sizes`; returns their top-left corners and the size used.
+/// Top-left corners of packed rectangles, and the width and height they use.
+type Packing = (Vec<(u32, u32)>, u32, u32);
+
+/// Packs rectangles of `sizes` within `max_side` a side; returns their top-left
+/// corners and the size used, or `None` when they do not fit.
 ///
 /// Rectangles go tallest first into a skyline, each where its top edge is lowest and
 /// then leftmost. Several widths are tried, and the one with the smallest area wins,
 /// then the squarest, then the narrowest. The result depends only on `sizes`.
-/// Top-left corners of packed rectangles, and the width and height they use.
-type Packing = (Vec<(u32, u32)>, u32, u32);
-
-fn pack(sizes: &[(u32, u32)]) -> Packing {
+fn pack(sizes: &[(u32, u32)], max_side: u32) -> Option<Packing> {
     if sizes.is_empty() {
-        return (Vec::new(), 0, 0);
+        return Some((Vec::new(), 0, 0));
     }
     let mut order: Vec<usize> = (0..sizes.len()).collect();
     order.sort_by_key(|&i| {
@@ -288,24 +319,28 @@ fn pack(sizes: &[(u32, u32)]) -> Packing {
         widths.push(p);
         p *= 2;
     }
+    widths.push(max_side as u64);
+    widths.retain(|&w| w >= widest && w <= max_side as u64);
     widths.sort_unstable();
     widths.dedup();
     let mut best: Option<Packing> = None;
     for width in widths {
-        let width = width.min(u32::MAX as u64) as u32;
-        let placed = skyline(sizes, &order, width);
+        let placed = skyline(sizes, &order, width as u32);
         let (w, h) = placed
             .iter()
             .zip(sizes)
             .fold((0, 0), |(mw, mh), (&(x, y), &(sw, sh))| {
                 (mw.max(x + sw), mh.max(y + sh))
             });
+        if h > max_side {
+            continue;
+        }
         let score = |w: u32, h: u32| (w as u64 * h as u64, w.max(h), w);
         if best.as_ref().is_none_or(|b| score(w, h) < score(b.1, b.2)) {
             best = Some((placed, w, h));
         }
     }
-    best.unwrap_or_default()
+    best
 }
 
 fn skyline(sizes: &[(u32, u32)], order: &[usize], width: u32) -> Vec<(u32, u32)> {
@@ -379,7 +414,7 @@ mod tests {
             x = x.wrapping_mul(1_103_515_245).wrapping_add(12345);
             sizes.push((1 + (x >> 16) % 40, 1 + (x >> 8) % 30));
         }
-        let (placed, w, h) = pack(&sizes);
+        let (placed, w, h) = pack(&sizes, 4096).unwrap();
         let rects: Vec<_> = placed
             .iter()
             .zip(&sizes)
@@ -394,13 +429,19 @@ mod tests {
         let area: u64 = sizes.iter().map(|&(w, h)| w as u64 * h as u64).sum();
         let used = w as u64 * h as u64;
         assert!(used < area * 13 / 10, "{used} for {area}");
-        assert_eq!(pack(&sizes), (placed, w, h), "deterministic");
+        assert_eq!(pack(&sizes, 4096), Some((placed, w, h)), "deterministic");
     }
 
     #[test]
     fn packs_equal_squares_into_a_square() {
-        let (_, w, h) = pack(&[(10, 10); 16]);
+        let (_, w, h) = pack(&[(10, 10); 16], 4096).unwrap();
         assert_eq!((w, h), (40, 40));
-        assert_eq!(pack(&[(3, 5)]).1, 3);
+        assert_eq!(pack(&[(3, 5)], 4096).unwrap().1, 3);
+        // Within a bound that forces a narrower, taller layout, or none at all.
+        let (_, w, h) = pack(&[(10, 10); 16], 20).unwrap_or_default();
+        assert_eq!((w, h), (0, 0), "16 squares of 10 do not fit in 20x20");
+        let (_, w, h) = pack(&[(10, 10); 4], 20).unwrap();
+        assert_eq!((w, h), (20, 20));
+        assert!(pack(&[(30, 1)], 20).is_none());
     }
 }

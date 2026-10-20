@@ -117,7 +117,7 @@ fn render_writes_files() {
         "2",
         "--padding",
         "2",
-        "--extrude",
+        "--no-extrude",
         "--json",
     ]);
     assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
@@ -132,7 +132,8 @@ fn render_writes_files() {
     let options = spritebox::ExportOptions {
         atlas: spritebox::AtlasOptions {
             padding: 2,
-            extrude: true,
+            extrude: false,
+            ..Default::default()
         },
     };
     let export = doc.export(&options).unwrap();
@@ -164,10 +165,10 @@ fn render_writes_tilesets() {
     let out = spritebox(&["render", tiles, "--out", dir.to_str().unwrap()]);
     assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
     let doc = spritebox::Document::parse(&std::fs::read_to_string(tiles).unwrap()).unwrap();
-    let tileset = doc.tileset("ground").unwrap();
+    let export = doc.export(&spritebox::ExportOptions::default()).unwrap();
     assert_eq!(
         spritebox::png::read_file(dir.join("tileset-ground.png")).unwrap(),
-        tileset.render()
+        export.tilesets[0].image
     );
     let text = stdout(&out);
     let written: Vec<&str> = text
@@ -254,7 +255,8 @@ fn usage_and_io_errors() {
         &["render", COIN, "--out"],
         &["render", COIN, "--out", "x", "--scale", "0"],
         &["check", COIN, "--out", "x"],
-        &["check", COIN, "--extrude"],
+        &["check", COIN, "--no-extrude"],
+        &["render", COIN, "--out", "x", "--max-side", "0"],
         &["font", COIN],
         &["render", COIN, "--out", "x", "--font", "hud"],
         &["render", COIN, "--out", "x", "--padding", "65"],

@@ -412,9 +412,12 @@ as **TrueType**:
 
 ## Output
 
-**RGBA8.** `Sprite::render` returns an `Image`: RGBA8 pixels, sRGB-encoded and not
-premultiplied, tightly packed, top row first. That is what GPU texture uploads take,
-and exactly what Diamon's `TextureStore::register` takes.
+**RGBA8.** Every `Image` the crate makes, from `Sprite::render` to the atlas, is
+RGBA8: four bytes a pixel in the order red, green, blue, alpha; sRGB-encoded colors;
+straight alpha, not premultiplied; rows tightly packed, without stride padding, top
+row first. A 50% translucent blue is `[0, 0, 255, 128]`, and a transparent pixel is
+`[0, 0, 0, 0]`. That is what GPU texture uploads take, and exactly what Diamon's
+`TextureStore::register` takes.
 
 **PNG.** `png::encode` writes an indexed PNG (1, 2, 4 or 8 bits a pixel, with
 `tRNS` for colors that are not opaque) when the image has at most 256 colors, which
@@ -426,12 +429,22 @@ It checks CRCs and rejects unknown critical chunks. Compatibility is tested agai
 files written by FFmpeg and macOS Image I/O, and FFmpeg reads the crate's files.
 
 **Atlases.** `Document::atlas` packs every sprite, and every sprite that animation
-frames build, into one texture. Each sprite gets `padding` empty pixels on every
-side (1 by default, so neighbors are 2 apart), which prevents bleeding with nearest
-sampling; `extrude` fills the padding with copies of edge pixels, for linear
-sampling. Sprites with identical pixels share one rectangle. Packing is a skyline,
-tallest first, trying several widths and keeping the smallest area; it depends only
-on the sprites, so the same file gives the same atlas.
+frames build, into one texture. `AtlasOptions` sets how it samples cleanly on a GPU:
+
+- **Padding.** Each sprite gets `padding` pixels on every side (1 by default), so
+  neighbors are `2 * padding` apart and `padding` from the edges. Use 0 for textures
+  sampled only with nearest filtering.
+- **Extrusion.** `extrude` (on by default) fills the padding with copies of each
+  sprite's edge pixels, so linear filtering and mipmaps do not mix in transparent
+  texels or neighbors. Off, the padding is transparent.
+- **Size.** `max_side` bounds the texture's width and height: 2048 by default, the
+  largest side that every WebGPU device supports. Art that does not fit is a
+  `LimitExceeded` error, never a second texture.
+
+Tileset textures get the same padding and extrusion. Sprites with identical pixels
+share one rectangle. Packing is a skyline, tallest first, trying several widths and
+keeping the smallest area; it depends only on the sprites, so the same file gives the
+same atlas.
 
 The `Atlas` holds the image, each sprite's `Rect` in texels, and the animations with
 each frame's rectangle and ticks. `Atlas::to_json` writes the same as JSON; for
@@ -482,6 +495,7 @@ and `Export::to_json` adds `tilesets`, `tilemaps` and `fonts` to the atlas's JSO
       "size": [64, 72],
       "tile_size": [8, 8],
       "columns": 8,
+      "padding": 1,
       "tiles": ["dirt/0", "dirt/1", "...", "brick", "spikes"],
       "terrains": {"dirt": {"variants": 47, "first": 1}, "stone": {"variants": 16, "first": 48}}
     }
@@ -503,7 +517,9 @@ and `Export::to_json` adds `tilesets`, `tilemaps` and `fonts` to the atlas's JSO
 ```
 
 (Shortened; the file writes every tile name, row and index, one string or row a line.)
-`tiles` lists the tile names in index order, so `tiles[0]` is tile 1. A map's `tiles`
+`tiles` lists the tile names in index order, so `tiles[0]` is tile 1, which is at
+`(padding, padding)`; tile `i` is at column `(i - 1) % columns` and row
+`(i - 1) / columns`, each cell `tile_size + 2 * padding` texels a side. A map's `tiles`
 are its rows from the top, each a list of indices, 0 for an empty cell. `solid` is
 ascending.
 
@@ -526,7 +542,8 @@ with names, sizes and ticks in a small built-in pixel font.
 
 ```text
 spritebox check <file> [--json]
-spritebox render <file> --out <dir> [--scale <n>] [--padding <n>] [--extrude] [--json]
+spritebox render <file> --out <dir> [--scale <n>] [--padding <n>] [--no-extrude]
+                 [--max-side <n>] [--json]
 spritebox font <file> --out <font.ttf> [--font <name>] [--family <name>] [--json]
 ```
 
@@ -610,8 +627,8 @@ fn parse_trusted(text: &str) -> spritebox::Result<Document> {
   blur in between, like any pixel font.
 - Terrains connect only to themselves: there are no transitions between terrains,
   such as grass meeting sand, and no animated tiles.
-- An atlas is one texture; when the sprites do not fit within
-  `Limits::max_image_side`, building it fails rather than spilling into a second.
+- An atlas is one texture; when the sprites do not fit within `max_side`, building
+  it fails rather than spilling into a second.
 - Color is sRGB throughout, and alpha is composited in sRGB with integer arithmetic.
   There is no color management: gamma, ICC and `sRGB` chunks of PNG input are ignored.
 - The PNG encoder writes no interlaced, 16-bit, grayscale or metadata chunks, and the

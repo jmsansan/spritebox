@@ -29,6 +29,7 @@ fn regions_hold_the_sprites() {
             .atlas(&AtlasOptions {
                 padding,
                 extrude: false,
+                ..AtlasOptions::default()
             })
             .unwrap();
         let names: Vec<&str> = atlas.regions.iter().map(|r| r.name.as_str()).collect();
@@ -145,6 +146,7 @@ fn extrusion_copies_edges_into_the_padding() {
         .atlas(&AtlasOptions {
             padding: 2,
             extrude: true,
+            ..AtlasOptions::default()
         })
         .unwrap();
     let r = atlas.region("s").unwrap();
@@ -249,9 +251,11 @@ fn options_and_limits() {
         .atlas(&AtlasOptions {
             padding: 65,
             extrude: false,
+            ..AtlasOptions::default()
         })
         .unwrap_err();
     assert_eq!(err.code, ErrorCode::InvalidArgument);
+    // A largest side beyond the image limits is not a valid option.
     let limits = Limits {
         max_image_side: 16,
         ..Limits::default()
@@ -259,7 +263,169 @@ fn options_and_limits() {
     let err = doc
         .atlas_with(&AtlasOptions::default(), &limits)
         .unwrap_err();
+    assert_eq!(err.code, ErrorCode::InvalidArgument);
+    for max_side in [0, 9000] {
+        let options = AtlasOptions {
+            max_side,
+            ..AtlasOptions::default()
+        };
+        assert_eq!(
+            doc.atlas(&options).unwrap_err().code,
+            ErrorCode::InvalidArgument
+        );
+    }
+}
+
+#[test]
+fn rgba_bytes_are_exactly_as_documented() {
+    // Straight (not premultiplied) sRGB RGBA8, rows top first, tightly packed.
+    let doc: Document = "palette p
+  .  transparent
+  r  #ff0000
+  h  #0000ff80
+  w  #ffffff
+sprite s 2x2
+  r.
+  hw
+"
+    .parse()
+    .unwrap();
+    let image = doc.sprite("s").unwrap().render();
+    assert_eq!(
+        image.pixels(),
+        [
+            255, 0, 0, 255, 0, 0, 0, 0, 0, 0, 255, 128, 255, 255, 255, 255
+        ]
+    );
+    // In the atlas, the region holds the same bytes.
+    let atlas = doc.atlas(&AtlasOptions::default()).unwrap();
+    let r = atlas.region("s").unwrap();
+    let mut bytes = Vec::new();
+    for y in r.y..r.y + 2 {
+        for x in r.x..r.x + 2 {
+            bytes.extend(atlas.image.pixel(x, y).unwrap().to_array());
+        }
+    }
+    assert_eq!(bytes, image.pixels());
+}
+
+#[test]
+fn every_sprite_border_is_extruded_by_default() {
+    let doc: Document = SHOWCASE.parse().unwrap();
+    for padding in [1, 2] {
+        let options = AtlasOptions {
+            padding,
+            ..AtlasOptions::default()
+        };
+        assert!(options.extrude);
+        let atlas = doc.atlas(&options).unwrap();
+        for region in &atlas.regions {
+            let r = region.rect;
+            let p = padding as i64;
+            for y in r.y as i64 - p..(r.y + r.height) as i64 + p {
+                for x in r.x as i64 - p..(r.x + r.width) as i64 + p {
+                    let cx = x.clamp(r.x as i64, (r.x + r.width - 1) as i64) as u32;
+                    let cy = y.clamp(r.y as i64, (r.y + r.height - 1) as i64) as u32;
+                    assert_eq!(
+                        atlas.image.pixel(x as u32, y as u32),
+                        atlas.image.pixel(cx, cy),
+                        "{} at ({x}, {y})",
+                        region.name
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn tileset_textures_are_padded_and_extruded() {
+    let doc: Document = include_str!("../examples/tiles.spritebox").parse().unwrap();
+    for (padding, extrude) in [(0, true), (1, true), (2, false)] {
+        let options = spritebox::ExportOptions {
+            atlas: AtlasOptions {
+                padding,
+                extrude,
+                ..AtlasOptions::default()
+            },
+        };
+        let export = doc.export(&options).unwrap();
+        let t = &export.tilesets[0];
+        let tileset = doc.tileset("ground").unwrap();
+        assert_eq!(t.padding, padding);
+        let cell = 8 + 2 * padding;
+        assert_eq!((t.image.width(), t.image.height()), (8 * cell, 9 * cell));
+        for index in 1..=tileset.tile_count() {
+            let r = t.tile_rect(index).unwrap();
+            assert_eq!(
+                (r.x, r.y),
+                (
+                    padding + (index - 1) % 8 * cell,
+                    padding + (index - 1) / 8 * cell
+                )
+            );
+            let tile = tileset.tile(index).unwrap().render();
+            let p = padding as i64;
+            for y in -p..8 + p {
+                for x in -p..8 + p {
+                    let inside = (0..8).contains(&x) && (0..8).contains(&y);
+                    let expected = if inside || extrude {
+                        tile.pixel(x.clamp(0, 7) as u32, y.clamp(0, 7) as u32)
+                    } else {
+                        Some(Color::TRANSPARENT)
+                    };
+                    let got = t
+                        .image
+                        .pixel((r.x as i64 + x) as u32, (r.y as i64 + y) as u32);
+                    assert_eq!(got, expected, "tile {index} at ({x}, {y})");
+                }
+            }
+        }
+        assert_eq!(t.tile_rect(0), None);
+        assert_eq!(t.tile_rect(tileset.tile_count() + 1), None);
+    }
+}
+
+#[test]
+fn art_too_large_for_the_bound_is_an_error() {
+    let doc: Document = SHOWCASE.parse().unwrap();
+    let options = AtlasOptions {
+        max_side: 20,
+        ..AtlasOptions::default()
+    };
+    let err = doc.atlas(&options).unwrap_err();
     assert_eq!(err.code, ErrorCode::LimitExceeded);
+    assert!(err.message.contains("20x20"), "{}", err.message);
+    // The default bound is 2048, the largest side every WebGPU device supports.
+    assert_eq!(AtlasOptions::default().max_side, 2048);
+    let mut text = String::from("palette p\n  a #ff0000\n");
+    for i in 0..5 {
+        text.push_str(&format!("sprite s{i} 1000x1\n  {}\n", "a".repeat(1000)));
+    }
+    let wide: Document = text.parse().unwrap();
+    assert_eq!(
+        wide.atlas(&AtlasOptions::default()).unwrap().image.width(),
+        1002
+    );
+    let options = AtlasOptions {
+        max_side: 1001,
+        ..AtlasOptions::default()
+    };
+    assert_eq!(
+        wide.atlas(&options).unwrap_err().code,
+        ErrorCode::LimitExceeded
+    );
+    // Tileset textures obey the bound too.
+    let tiles: Document = include_str!("../examples/tiles.spritebox").parse().unwrap();
+    let export = spritebox::ExportOptions {
+        atlas: AtlasOptions {
+            max_side: 64,
+            ..AtlasOptions::default()
+        },
+    };
+    let err = tiles.export(&export).unwrap_err();
+    assert_eq!(err.code, ErrorCode::LimitExceeded);
+    assert!(err.message.contains("Tileset `ground`"), "{}", err.message);
 }
 
 #[test]
@@ -280,6 +446,7 @@ fn packs_many_sprites_tightly() {
         .atlas(&AtlasOptions {
             padding: 0,
             extrude: false,
+            ..AtlasOptions::default()
         })
         .unwrap();
     let used: u64 = atlas

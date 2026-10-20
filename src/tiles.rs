@@ -300,6 +300,30 @@ impl Tileset {
         let rows = self.tile_count().div_ceil(self.columns).max(1);
         (self.columns * self.tile_width, rows * self.tile_height)
     }
+    /// The texture's size with `padding` pixels around each tile.
+    pub fn padded_size(&self, padding: u32) -> (u64, u64) {
+        let rows = self.tile_count().div_ceil(self.columns).max(1) as u64;
+        let cell = |side: u32| side as u64 + 2 * padding as u64;
+        (
+            self.columns as u64 * cell(self.tile_width),
+            rows * cell(self.tile_height),
+        )
+    }
+
+    /// The texture with `padding` pixels around each tile, extruded from its edges
+    /// when `extrude` is set. The caller checks [`Tileset::padded_size`].
+    pub(crate) fn render_padded(&self, padding: u32, extrude: bool) -> Image {
+        let (w, h) = self.padded_size(padding);
+        let mut image = Image::blank(w as u32, h as u32);
+        for (i, tile) in self.tiles.iter().enumerate() {
+            let (col, row) = (i as u32 % self.columns, i as u32 / self.columns);
+            let x = padding + col * (self.tile_width + 2 * padding);
+            let y = padding + row * (self.tile_height + 2 * padding);
+            crate::atlas::place(&mut image, &tile.render(), x, y, padding, extrude);
+        }
+        image
+    }
+
     /// The texture: tile 1 at the top left, then row by row, with no spacing.
     pub fn render(&self) -> Image {
         let (w, h) = self.image_size();

@@ -18,6 +18,7 @@
   `rot270`, `offset(dx,dy)`, `pad(n)`, `swap(palette)` and `outline(key)`, also as
   methods of `Sprite`.
 - Animations: frames of sprites or chains with ticks, looping or once.
+- Tileset textures with the atlas's padding and extrusion.
 - Tilesets of plain tiles and autotiled terrains: 16 variants from 4 pieces, or 47
   from 5, assembled by quarters from each tile's neighbours.
 - Tilemaps: a legend of keys for tiles, terrains, fixed variants and `empty`, a map
@@ -27,8 +28,8 @@
 - Pixel fonts: glyph grids with an advance, a baseline and a line height; text drawn
   with them; and TrueType export whose outlines are the pixels as squares, merged
   where they share an edge, with the em at the glyph height.
-- Atlases: sprites and frame sprites packed into one texture with padding and
-  optional extrusion, identical sprites shared, with each sprite's rectangle and
+- Atlases: sprites and frame sprites packed into one texture with padding,
+  extruded by default, within a largest side of 2048 by default, identical sprites shared, with each sprite's rectangle and
   each animation's frames as Rust structs and as JSON written by the crate.
 - Preview sheets of a document's sprites and animations, labelled in a built-in
   pixel font.

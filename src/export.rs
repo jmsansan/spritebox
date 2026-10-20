@@ -3,7 +3,9 @@
 
 use crate::atlas::write_header;
 use crate::json::{Writer, list};
-use crate::{Atlas, AtlasOptions, Document, Image, Limits, Result, Scheme, Tilemap, TtfOptions};
+use crate::{
+    Atlas, AtlasOptions, Document, Error, Image, Limits, Result, Scheme, Tilemap, TtfOptions,
+};
 
 /// How a document is exported.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -18,16 +20,39 @@ pub struct TilesetExport {
     pub name: String,
     /// The texture's file name: `tileset-NAME.png`.
     pub file: String,
-    /// Tile 1 at the top left, then row by row, `columns` a row, with no spacing.
+    /// Tile 1 at the top left, then row by row, `columns` a row, each with `padding`
+    /// pixels around it.
     pub image: Image,
     pub tile_width: u32,
     pub tile_height: u32,
     pub columns: u32,
+    /// Pixels around each tile, as [`AtlasOptions::padding`]: tiles are
+    /// `2 * padding` apart and `padding` from the edges.
+    pub padding: u32,
     /// The tiles' names in index order: `tiles[0]` is tile 1. A terrain's variants
     /// are `TERRAIN/VARIANT`.
     pub tiles: Vec<String>,
     /// Each terrain's name, scheme and first tile index.
     pub terrains: Vec<(String, Scheme, u32)>,
+}
+
+impl TilesetExport {
+    /// Where tile `index`, from 1, is in [`TilesetExport::image`], without its padding.
+    pub fn tile_rect(&self, index: u32) -> Option<crate::Rect> {
+        let i = index
+            .checked_sub(1)
+            .filter(|&i| (i as usize) < self.tiles.len())?;
+        let (cw, ch) = (
+            self.tile_width + 2 * self.padding,
+            self.tile_height + 2 * self.padding,
+        );
+        Some(crate::Rect {
+            x: self.padding + i % self.columns * cw,
+            y: self.padding + i / self.columns * ch,
+            width: self.tile_width,
+            height: self.tile_height,
+        })
+    }
 }
 
 /// A font as a TrueType file.
@@ -75,6 +100,7 @@ impl Export {
             w.raw(Some("size"), &list(&[t.image.width(), t.image.height()]));
             w.raw(Some("tile_size"), &list(&[t.tile_width, t.tile_height]));
             w.raw(Some("columns"), &t.columns.to_string());
+            w.raw(Some("padding"), &t.padding.to_string());
             w.array(Some("tiles"));
             for tile in &t.tiles {
                 w.string(None, tile);
@@ -144,24 +170,35 @@ pub(crate) fn build(
     limits: &Limits,
 ) -> Result<Export> {
     let atlas = document.atlas_with(&options.atlas, limits)?;
-    let tilesets = document
-        .tilesets
-        .iter()
-        .map(|t| TilesetExport {
+    let pad = options.atlas.padding;
+    let max = options.atlas.max_side;
+    let mut tilesets = Vec::with_capacity(document.tilesets.len());
+    for t in &document.tilesets {
+        let (w, h) = t.padded_size(pad);
+        if w > max as u64 || h > max as u64 {
+            return Err(Error::limit(format!(
+                "Tileset `{}` is {w}x{h} texels with padding {pad}, more than the largest side of {max}; \
+                 raise `max_side` or use fewer columns",
+                t.name
+            )));
+        }
+        Image::check_size(w as u32, h as u32, limits)?;
+        tilesets.push(TilesetExport {
             name: t.name.clone(),
             file: format!("tileset-{}.png", t.name),
-            image: t.render(),
+            image: t.render_padded(pad, options.atlas.extrude),
             tile_width: t.tile_width,
             tile_height: t.tile_height,
             columns: t.columns,
+            padding: pad,
             tiles: t.tiles.iter().map(|s| s.name.clone()).collect(),
             terrains: t
                 .terrains
                 .iter()
                 .map(|r| (r.name.clone(), r.scheme, r.first))
                 .collect(),
-        })
-        .collect();
+        });
+    }
     let fonts = document
         .fonts
         .iter()

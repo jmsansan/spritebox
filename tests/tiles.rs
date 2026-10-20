@@ -281,9 +281,10 @@ tilemap m
         r#"  "tilesets": {
     "t": {
       "image": "tileset-t.png",
-      "size": [4, 2],
+      "size": [8, 4],
       "tile_size": [2, 2],
       "columns": 2,
+      "padding": 1,
       "tiles": [
         "a",
         "b"
@@ -312,7 +313,7 @@ tilemap m
     let files = export.files();
     assert_eq!(
         spritebox::png::decode(&files[1].1).unwrap(),
-        doc.tileset("t").unwrap().render()
+        export.tilesets[0].image
     );
 }
 
