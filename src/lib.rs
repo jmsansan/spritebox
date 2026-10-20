@@ -41,6 +41,9 @@
 //! block). `;` starts a comment that runs to the end of the line. Blank lines are
 //! ignored. Names use ASCII letters, digits, `_` and `-`.
 //!
+//! `import NAME` brings in the definitions of another file, loaded by a function the
+//! caller gives [`Document::parse_with_loader`]; the crate itself reads no files.
+//!
 //! ## Palettes
 //!
 //! ```text
@@ -181,7 +184,7 @@ mod tiles;
 mod ttf;
 
 pub use atlas::{Atlas, AtlasAnimation, AtlasFrame, AtlasOptions, Rect, Region};
-pub use document::{Animation, Document, Frame, check};
+pub use document::{Animation, Document, Frame, check, check_with_loader};
 pub use error::{Error, ErrorCode, Position, Result};
 pub use export::{ATLAS_FILE, Export, ExportOptions, FontExport, METADATA_FILE, TilesetExport};
 pub use font::{Font, Glyph, TtfOptions};

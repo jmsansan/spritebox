@@ -37,6 +37,15 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.85.0
       - run: cargo test --locked --offline
 
+  wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - run: cargo check --locked --offline --lib --target wasm32-unknown-unknown
+
   interoperability:
     runs-on: ubuntu-latest
     steps:

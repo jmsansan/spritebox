@@ -12,7 +12,7 @@ pub(crate) struct Token<'a> {
 impl<'a> Token<'a> {
     /// The position of the character `chars` characters into the token.
     pub fn at(&self, chars: usize) -> Position {
-        Position::new(self.pos.line, self.pos.column + chars)
+        Position::in_file(self.pos.file, self.pos.line, self.pos.column + chars)
     }
     /// The position just after the token's last character.
     pub fn end(&self) -> Position {
@@ -51,14 +51,15 @@ impl<'a> Node<'a> {
 
 /// Splits `text` into a tree of lines. Errors are appended to `errors`; the lines
 /// they concern are left out.
-pub(crate) fn lex<'a>(text: &'a str, errors: &mut Vec<Error>) -> Vec<Node<'a>> {
+/// Positions name `file`, the index of the text among the files of a parse.
+pub(crate) fn lex<'a>(text: &'a str, file: u32, errors: &mut Vec<Error>) -> Vec<Node<'a>> {
     let mut roots: Vec<Node<'a>> = Vec::new();
     // The open nodes, outermost first.
     let mut stack: Vec<Node<'a>> = Vec::new();
     for (index, raw) in text.split('\n').enumerate() {
         let number = index + 1;
         let raw = raw.strip_suffix('\r').unwrap_or(raw);
-        let Some(line) = lex_line(raw, number, errors) else {
+        let Some(line) = lex_line(raw, file, number, errors) else {
             continue;
         };
         while stack
@@ -88,7 +89,7 @@ pub(crate) fn lex<'a>(text: &'a str, errors: &mut Vec<Error>) -> Vec<Node<'a>> {
                 )
             };
             errors.push(Error::at(
-                Position::new(number, line.indent + 1),
+                Position::in_file(file, number, line.indent + 1),
                 ErrorCode::Syntax,
                 message,
             ));
@@ -114,7 +115,12 @@ fn close<'a>(stack: &mut Vec<Node<'a>>, roots: &mut Vec<Node<'a>>) {
     }
 }
 
-fn lex_line<'a>(raw: &'a str, number: usize, errors: &mut Vec<Error>) -> Option<Line<'a>> {
+fn lex_line<'a>(
+    raw: &'a str,
+    file: u32,
+    number: usize,
+    errors: &mut Vec<Error>,
+) -> Option<Line<'a>> {
     let content = match raw.find(';') {
         Some(i) => &raw[..i],
         None => raw,
@@ -127,7 +133,7 @@ fn lex_line<'a>(raw: &'a str, number: usize, errors: &mut Vec<Error>) -> Option<
             indent += 1;
         } else if c == '\t' {
             errors.push(Error::at(
-                Position::new(number, column),
+                Position::in_file(file, number, column),
                 ErrorCode::Syntax,
                 "Indent with spaces, not tabs",
             ));
@@ -145,7 +151,7 @@ fn lex_line<'a>(raw: &'a str, number: usize, errors: &mut Vec<Error>) -> Option<
             column += 1;
             continue;
         }
-        let pos = Position::new(number, column);
+        let pos = Position::in_file(file, number, column);
         let mut depth = 0usize;
         let mut end = content.len();
         while let Some(&(i, c)) = chars.peek() {
@@ -196,6 +202,7 @@ mod tests {
         let mut errors = Vec::new();
         let nodes = lex(
             "a 1 ; comment\n  b\n    c\n    d\n  e\n\n   ; only a comment\nf\r\n  g(1, 2) h\n",
+            0,
             &mut errors,
         );
         assert!(errors.is_empty(), "{errors:?}");
@@ -209,7 +216,7 @@ mod tests {
     #[test]
     fn columns_count_characters() {
         let mut errors = Vec::new();
-        let nodes = lex("é ü x", &mut errors);
+        let nodes = lex("é ü x", 0, &mut errors);
         let x = nodes[0].line.tokens[2];
         assert_eq!(x.pos.column, 5);
     }
@@ -217,7 +224,7 @@ mod tests {
     #[test]
     fn reports_bad_indentation() {
         let mut errors = Vec::new();
-        let nodes = lex(" a\nb\n    c\n  d\n\te\n", &mut errors);
+        let nodes = lex(" a\nb\n    c\n  d\n\te\n", 0, &mut errors);
         let found: Vec<(usize, usize)> = errors
             .iter()
             .map(|e| (e.position.unwrap().line, e.position.unwrap().column))

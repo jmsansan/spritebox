@@ -105,7 +105,35 @@ impl Document {
 
     /// Parses and validates `text` within `limits`.
     pub fn parse_with(text: &str, limits: &Limits) -> Result<Self> {
-        let (document, mut errors) = crate::text::parse(text, limits);
+        Self::finish(crate::text::parse(text, limits, None))
+    }
+
+    /// Parses and validates `text` within `limits`, loading the files it imports with
+    /// `loader`, which takes a file's name and returns its text. Names resolve from
+    /// the importing file's directory, with `/` between parts, so the loader decides
+    /// what they mean: files on disk, assets embedded in a game, or anything else.
+    ///
+    /// ```
+    /// use spritebox::{Document, Error, ErrorCode, Limits};
+    ///
+    /// let mut loader = |name: &str| match name {
+    ///     "shared/palettes.spritebox" => Ok("palette dawn\n  k #1a1c2c\n".to_owned()),
+    ///     _ => Err(Error::new(ErrorCode::Io, format!("no file {name}"))),
+    /// };
+    /// let text = "import shared/palettes.spritebox\nsprite dot 1x1 palette=dawn\n  k\n";
+    /// let document = Document::parse_with_loader(text, &Limits::default(), &mut loader)?;
+    /// assert!(document.palette("dawn").is_some());
+    /// # Ok::<(), Error>(())
+    /// ```
+    pub fn parse_with_loader(
+        text: &str,
+        limits: &Limits,
+        loader: &mut dyn FnMut(&str) -> Result<String>,
+    ) -> Result<Self> {
+        Self::finish(crate::text::parse(text, limits, Some(loader)))
+    }
+
+    fn finish((document, mut errors): (Self, Vec<Error>)) -> Result<Self> {
         if errors.is_empty() {
             return Ok(document);
         }
@@ -217,5 +245,16 @@ impl FromStr for Document {
 /// assert_eq!(errors[0].position.unwrap().line, 2);
 /// ```
 pub fn check(text: &str, limits: &Limits) -> Vec<Error> {
-    crate::text::parse(text, limits).1
+    crate::text::parse(text, limits, None).1
+}
+
+/// [`check`], loading imported files with `loader` as
+/// [`Document::parse_with_loader`] does. Errors in an imported file name it in
+/// [`Error::file`].
+pub fn check_with_loader(
+    text: &str,
+    limits: &Limits,
+    loader: &mut dyn FnMut(&str) -> Result<String>,
+) -> Vec<Error> {
+    crate::text::parse(text, limits, Some(loader)).1
 }

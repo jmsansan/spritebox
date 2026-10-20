@@ -3,6 +3,7 @@
 mod animation;
 mod chain;
 mod font;
+mod import;
 mod lex;
 mod sprite;
 mod tiles;
@@ -11,16 +12,24 @@ use std::collections::HashMap;
 
 use crate::{Color, Document, Error, ErrorCode, Limits, Palette, Position, Sprite};
 use animation::AnimationDef;
+use import::Files;
+pub(crate) use import::Loader;
 use lex::{Node, Token};
 use sprite::SpriteDef;
 use tiles::{TilemapDef, TilesetDef};
 
 /// The directives that start a definition.
-const DIRECTIVES: &str = "`palette`, `sprite`, `animation`, `tileset`, `tilemap` or `font`";
+const DIRECTIVES: &str =
+    "`import`, `palette`, `sprite`, `animation`, `tileset`, `tilemap` or `font`";
 
-/// Parses `text`. Returns the document, complete when there are no errors, and the
-/// errors ordered by position.
-pub(crate) fn parse(text: &str, limits: &Limits) -> (Document, Vec<Error>) {
+/// Parses `text`, loading the files it imports through `loader`. Returns the
+/// document, complete when there are no errors, and the errors ordered by file, then
+/// position.
+pub(crate) fn parse(
+    text: &str,
+    limits: &Limits,
+    loader: Option<&mut Loader>,
+) -> (Document, Vec<Error>) {
     let mut errors = Vec::new();
     if text.len() > limits.max_text_bytes {
         errors.push(Error::at(
@@ -34,7 +43,13 @@ pub(crate) fn parse(text: &str, limits: &Limits) -> (Document, Vec<Error>) {
         ));
         return (Document::default(), errors);
     }
-    let nodes = lex::lex(text, &mut errors);
+    let files = Files::load(text, limits, loader, &mut errors);
+    let lexed: Vec<Vec<Node>> = files
+        .texts
+        .iter()
+        .enumerate()
+        .map(|(i, t)| lex::lex(t, i as u32, &mut errors))
+        .collect();
     let mut parser = Parser {
         limits,
         errors,
@@ -46,25 +61,68 @@ pub(crate) fn parse(text: &str, limits: &Limits) -> (Document, Vec<Error>) {
         fonts: Vec::new(),
         failed_fonts: Vec::new(),
     };
-    for (count, node) in nodes.iter().enumerate() {
-        if count == limits.max_definitions {
-            parser.errors.push(node.line.first().error(
-                ErrorCode::LimitExceeded,
-                format!(
-                    "More than the limit of {} definitions",
-                    limits.max_definitions
-                ),
-            ));
-            break;
-        }
-        if let Err(e) = parser.definition(node) {
-            parser.errors.push(e);
-        }
-    }
+    // Imported definitions take the place of their `import`.
+    let mut walk = Walk {
+        lexed: &lexed,
+        targets: &files.targets,
+        walked: vec![false; lexed.len()],
+        count: 0,
+    };
+    walk.walked[0] = true;
+    walk.file(&mut parser, 0);
     let document = parser.resolve();
     let mut errors = parser.errors;
     errors.sort_by_key(|e| e.position);
+    for e in &mut errors {
+        if let Some(p) = e.position.filter(|p| p.file > 0) {
+            e.file = files.names.get(p.file as usize).cloned();
+        }
+    }
     (document, errors)
+}
+
+struct Walk<'n, 'a> {
+    lexed: &'n [Vec<Node<'a>>],
+    targets: &'n HashMap<(u32, usize), u32>,
+    walked: Vec<bool>,
+    count: usize,
+}
+
+impl<'a> Walk<'_, 'a> {
+    /// Parses the definitions of `file`, and of the files it imports where they are
+    /// imported. Returns false once the limit of definitions is passed.
+    fn file(&mut self, parser: &mut Parser<'a, '_>, file: u32) -> bool {
+        let lexed = self.lexed;
+        for node in &lexed[file as usize] {
+            if node.keyword() == "import" {
+                let line = node.line.first().pos.line;
+                if let Some(&target) = self.targets.get(&(file, line)) {
+                    if !self.walked[target as usize] {
+                        self.walked[target as usize] = true;
+                        if !self.file(parser, target) {
+                            return false;
+                        }
+                    }
+                }
+                continue;
+            }
+            if self.count == parser.limits.max_definitions {
+                parser.errors.push(node.line.first().error(
+                    ErrorCode::LimitExceeded,
+                    format!(
+                        "More than the limit of {} definitions",
+                        parser.limits.max_definitions
+                    ),
+                ));
+                return false;
+            }
+            self.count += 1;
+            if let Err(e) = parser.definition(node) {
+                parser.errors.push(e);
+            }
+        }
+        true
+    }
 }
 
 type Parsed<T> = std::result::Result<T, Error>;

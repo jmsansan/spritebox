@@ -35,7 +35,9 @@ which does the same for game audio.
 | Atlases: packed sprites and frames with padding; metadata as Rust structs and JSON | Available |
 | Pixel fonts: glyph grids, text drawing, and TrueType export | Available |
 | Preview sheets | Available (sprites, animations) |
-| Command-line tool: `check`, `render` | Available |
+| Imports of other files through a loader; no file system needed | Available |
+| WebAssembly (`wasm32-unknown-unknown`) | Available |
+| Command-line tool: `check`, `render`, `font` | Available |
 | Seeded procedural textures: value noise and ordered dithering | Planned |
 
 ## Install
@@ -154,6 +156,31 @@ animation sprout_hurt once
 
 The full file, with a spinning coin, is
 [examples/showcase.spritebox](examples/showcase.spritebox).
+
+### Imports
+
+`import NAME` brings in the definitions of another file, as if they were written in
+place of the line: a palette shared by several files, say.
+
+```text
+import shared/palettes.spritebox
+
+sprite coin 8x8 palette=dawn
+  ...
+```
+
+- **Names.** A name has no spaces. It resolves from the importing file's directory,
+  with `/` between parts and `.` and `..` resolved; a name that starts with `/` does
+  not.
+- **Loading.** The crate reads no files itself: `Document::parse_with_loader` takes
+  a loader, a function from a name to the file's text. The command-line tool reads
+  from disk, relative to the file it checks; a game can read from assets embedded in
+  its build. `Document::parse`, which has no loader, reports each `import` as an
+  error.
+- **Rules.** A file is imported once, however many files import it. Circles are a
+  `cycle` error, imports nest at most `max_nesting` deep, and all the files together
+  stay within `max_text_bytes`. An error in an imported file names it in
+  `Error::file`.
 
 ### Palettes
 
@@ -586,6 +613,29 @@ and tiles are scaled up by an integer factor (4 by default), maps by half of it,
 checkerboard that shows transparency, with lines between pixels or tiles, labelled
 with names, sizes and ticks in a small built-in pixel font.
 
+## From memory, and in WebAssembly
+
+Everything from text to PNG, JSON and TrueType bytes works in memory: no file system
+is touched unless a caller asks, through `png::read_file`, `png::write_file` or its
+own loader. The library builds for `wasm32-unknown-unknown`, and a game running in a
+browser parses art embedded in its build or fetched by the page:
+
+```rust
+fn art(embedded: &std::collections::HashMap<&str, &str>) -> spritebox::Result<spritebox::Export> {
+    let mut loader = |name: &str| {
+        embedded.get(name).map(|t| t.to_string()).ok_or_else(|| {
+            spritebox::Error::new(spritebox::ErrorCode::Io, format!("no asset {name}"))
+        })
+    };
+    let document = spritebox::Document::parse_with_loader(
+        embedded["art/level1.spritebox"],
+        &spritebox::Limits::default(),
+        &mut loader,
+    )?;
+    document.export(&spritebox::ExportOptions::default())
+}
+```
+
 ## Command-line tool
 
 ```text
@@ -615,8 +665,8 @@ Exit statuses are stable: **0** success, **1** the file has errors, **2** bad us
 ],"written":[]}
 ```
 
-Each diagnostic has a `code` and a `message`, and `line` and `column` when it
-concerns a place in the text. `written` lists the files that `render` wrote.
+Each diagnostic has a `code` and a `message`; `line` and `column` when it concerns a
+place in the text; and `file` when that place is in an imported file. `written` lists the files that `render` wrote.
 
 ## Errors
 
@@ -696,6 +746,7 @@ cargo test
 cargo test --release
 cargo +1.85.0 test
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
+cargo check --lib --target wasm32-unknown-unknown   # rustup target add wasm32-unknown-unknown
 SPRITEBOX_FFMPEG_TESTS=1 cargo test --test png   # needs FFmpeg
 SPRITEBOX_FONT_TESTS=1 cargo test --test font    # needs fc-scan; on macOS, swift
 cargo publish --dry-run
@@ -706,7 +757,8 @@ macOS, `sips`; see [tests/fixtures/README.md](tests/fixtures/README.md).
 
 To release: update `CHANGELOG.md` and the version in `Cargo.toml`, run the checks,
 merge to `main`, run `cargo publish`, then tag `vX.Y.Z` and publish a GitHub release,
-which runs CI on Linux, macOS and Windows, the MSRV and FFmpeg interoperability.
+which runs CI on Linux, macOS and Windows, the MSRV, the WebAssembly build, and FFmpeg
+and FreeType interoperability.
 
 ## License
 

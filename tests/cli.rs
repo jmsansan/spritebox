@@ -233,6 +233,47 @@ fn font_writes_truetype() {
 }
 
 #[test]
+fn imports_are_read_from_disk_relative_to_the_file() {
+    let dir = temp_dir("imports");
+    std::fs::create_dir_all(dir.join("art/shared")).unwrap();
+    write(
+        &dir,
+        "art/shared/palettes.spritebox",
+        "palette p\n  k #000000\n  x #00\n",
+    );
+    let main = write(
+        &dir,
+        "art/main.spritebox",
+        "import shared/palettes.spritebox\nsprite s 1x1\n  k\n",
+    );
+    let out = spritebox(&["check", &main]);
+    assert_eq!(out.status.code(), Some(1));
+    let expected = dir.join("art/shared/palettes.spritebox");
+    let text = stderr(&out);
+    assert!(
+        text.contains(&format!(
+            "{}:3:5: error[invalid_argument]",
+            expected.display()
+        )),
+        "{text}"
+    );
+    let out = spritebox(&["check", &main, "--json"]);
+    assert!(
+        stdout(&out).contains(&format!("\"file\":{:?}", expected.display().to_string())),
+        "{}",
+        stdout(&out)
+    );
+    write(
+        &dir,
+        "art/shared/palettes.spritebox",
+        "palette p\n  k #000000\n",
+    );
+    let out = spritebox(&["render", &main, "--out", dir.join("out").to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn render_does_not_write_invalid_files() {
     let dir = temp_dir("render-invalid");
     let file = write(&dir, "bad.spritebox", BAD);

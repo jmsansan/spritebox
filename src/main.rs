@@ -161,14 +161,21 @@ fn run(options: &Options) -> ExitCode {
         Err(error) => return report(options, &[error], &[], EXIT_IO),
     };
     let limits = Limits::default();
-    let errors = spritebox::check(&text, &limits);
+    // Imports are read from disk, relative to the file's directory.
+    let base = base_dir(&options.file);
+    let mut loader = |name: &str| -> Result<String, Error> {
+        let path = base.join(name);
+        std::fs::read_to_string(&path)
+            .map_err(|e| Error::new(ErrorCode::Io, format!("{}: {e}", path.display())))
+    };
+    let errors = spritebox::check_with_loader(&text, &limits, &mut loader);
     if !errors.is_empty() {
         return report(options, &errors, &[], EXIT_INVALID);
     }
     if options.command == "check" {
         return report(options, &[], &[], 0);
     }
-    let document = match Document::parse_with(&text, &limits) {
+    let document = match Document::parse_with_loader(&text, &limits, &mut loader) {
         Ok(document) => document,
         Err(error) => return report(options, &[error], &[], EXIT_INVALID),
     };
@@ -301,6 +308,26 @@ fn render(
     Ok(written)
 }
 
+/// The directory that imports resolve from: the file's, or the current one for
+/// standard input.
+fn base_dir(file: &str) -> PathBuf {
+    if file == "-" {
+        return PathBuf::new();
+    }
+    Path::new(file)
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_default()
+}
+
+/// The file an error is in, as the user would open it.
+fn error_file(options: &Options, e: &Error, main: &str) -> String {
+    match &e.file {
+        Some(imported) => base_dir(&options.file).join(imported).display().to_string(),
+        None => main.to_owned(),
+    }
+}
+
 /// Prints the outcome and returns `status`.
 fn report(options: &Options, errors: &[Error], written: &[PathBuf], status: u8) -> ExitCode {
     let file = if options.file == "-" {
@@ -321,6 +348,9 @@ fn report(options: &Options, errors: &[Error], written: &[PathBuf], status: u8) 
                 json.push(',');
             }
             let _ = write!(json, "{{\"code\":{}", quote(e.code.as_str()));
+            if e.file.is_some() {
+                let _ = write!(json, ",\"file\":{}", quote(&error_file(options, e, file)));
+            }
             if let Some(p) = e.position {
                 let _ = write!(json, ",\"line\":{},\"column\":{}", p.line, p.column);
             }
@@ -337,12 +367,13 @@ fn report(options: &Options, errors: &[Error], written: &[PathBuf], status: u8) 
         println!("{json}");
     } else {
         for e in errors {
+            let at = error_file(options, e, file);
             match e.position {
                 Some(p) => eprintln!(
-                    "{file}:{}:{}: error[{}]: {}",
+                    "{at}:{}:{}: error[{}]: {}",
                     p.line, p.column, e.code, e.message
                 ),
-                None => eprintln!("{file}: error[{}]: {}", e.code, e.message),
+                None => eprintln!("{at}: error[{}]: {}", e.code, e.message),
             }
         }
         for path in written {

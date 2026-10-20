@@ -7,6 +7,11 @@
 - The text format's palettes, with `from=` copies, and sprites as grids of keys.
 - Diagnostics with a line, a column and a stable `ErrorCode`; `check` returns every
   error in a file at once.
+- `import NAME`: definitions of other files, loaded through a caller's loader
+  (`Document::parse_with_loader`, `check_with_loader`); the command-line tool reads
+  them from disk. Errors in imported files name the file.
+- Builds for `wasm32-unknown-unknown`; nothing on the path from text to output
+  touches the file system.
 - `Limits` on text, definitions, palettes, sprite and image sizes, and nesting.
 - `Image`: RGBA8 pixels, sRGB-encoded, not premultiplied, top row first.
 - `png`: a deterministic encoder that writes indexed PNG for pixel art, and a
