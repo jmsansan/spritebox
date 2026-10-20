@@ -1,0 +1,42 @@
+; A coin and a gem, drawn with one palette and recolored with another.
+palette dawn
+  .  transparent
+  k  #1a1c2c
+  o  #f4b41b
+  y  #ffe478
+  w  #ffffff
+  g  #38b764
+  G  #a7f070
+
+palette dusk from=dawn
+  o  #b86f50
+  y  #e4a672
+
+sprite coin 8x8 palette=dawn
+  ..kkkk..
+  .kooyyk.
+  kooyywok
+  kooyyook
+  kooooook
+  koooooyk
+  .koooyk.
+  ..kkkk..
+
+sprite coin_dusk 8x8 palette=dusk
+  ..kkkk..
+  .kooyyk.
+  kooyywok
+  kooyyook
+  kooooook
+  koooooyk
+  .koooyk.
+  ..kkkk..
+
+sprite gem 7x7 palette=dawn
+  ..kkk..
+  .kGGgk.
+  kGwGggk
+  kGGgggk
+  .kgggk.
+  ..kgk..
+  ...k...

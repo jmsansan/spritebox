@@ -1,0 +1,20 @@
+[package]
+name = "spritebox"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+authors = ["Jose Sanchez <jose.sansan@proton.me>"]
+description = "Zero-dependency, safe Rust pixel art as plain text: palettes, sprites, animations, tilesets with autotiling, tilemaps and pixel fonts, rendered to RGBA, PNG and atlases with metadata"
+license = "MIT"
+repository = "https://github.com/jmsansan/spritebox"
+documentation = "https://docs.rs/spritebox"
+readme = "README.md"
+keywords = ["pixel-art", "sprite", "gamedev", "png", "tilemap"]
+categories = ["game-development", "multimedia::images", "graphics", "command-line-utilities"]
+include = ["/Cargo.toml", "/Cargo.lock", "/src/**", "/tests/**", "/examples/*.rs", "/examples/*.spritebox", "/README.md", "/CHANGELOG.md", "/LICENSE"]
+
+[dependencies]
+
+[[bin]]
+name = "spritebox"
+path = "src/main.rs"

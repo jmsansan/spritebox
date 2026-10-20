@@ -1,0 +1,48 @@
+name: Rust
+
+# Runs when a release is published, or on demand from the Actions tab, to save
+# Actions minutes. Run the checks locally before each pull request (see the README).
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - run: cargo fmt --check
+      - run: cargo clippy --locked --offline --all-targets -- -D warnings
+      - run: cargo test --locked --offline
+      - run: cargo test --locked --offline --release
+      - run: cargo doc --locked --offline --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+      - run: cargo package --locked --offline
+
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.85.0
+      - run: cargo test --locked --offline
+
+  interoperability:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: cargo test --locked --offline --test png
+        env:
+          SPRITEBOX_FFMPEG_TESTS: '1'
