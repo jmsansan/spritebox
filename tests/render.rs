@@ -3,6 +3,7 @@
 use spritebox::{Color, Document, Image, PreviewOptions, png};
 
 const COIN: &str = include_str!("../examples/coin.spritebox");
+const SHOWCASE: &str = include_str!("../examples/showcase.spritebox");
 
 /// FNV-1a of the image's size and RGBA bytes.
 fn checksum(image: &Image) -> u64 {
@@ -136,5 +137,39 @@ fn preview_options() {
             .unwrap_err()
             .code,
         spritebox::ErrorCode::LimitExceeded
+    );
+}
+
+#[test]
+fn golden_showcase() {
+    let doc: Document = SHOWCASE.parse().unwrap();
+    let sums: Vec<String> = doc
+        .sprites()
+        .iter()
+        .chain(doc.frame_sprites())
+        .map(|s| format!("{} {:#018x}", s.name(), checksum(&s.render())))
+        .collect();
+    let expected = [
+        "sprout 0xc66c7d367373108d",
+        "sprout_left 0x124913331e827c65",
+        "sprout_night 0x526bcf94e6169a7f",
+        "sprout_outlined 0x98ada1746f675815",
+        "coin 0xdefcae9f2446c526",
+        "coin_edge 0x0dbde90e2bc13136",
+        "coin_thin 0x39648771957a95bd",
+        "arrow 0x4764a09a1ea97c85",
+        "arrow_down 0x21e1efaa8353da05",
+        "badge 0xd90dbc557dffcd3d",
+        "coin_edge:flip_x 0xd12e87feea1b4b8e",
+        "sprout:offset(0,1) 0x9cc406057b316335",
+        "sprout:swap(dusk) 0x526bcf94e6169a7f",
+    ];
+    assert_eq!(sums, expected);
+    let sheet = doc.preview(&PreviewOptions::default()).unwrap();
+    assert_eq!(
+        checksum(&sheet),
+        0xe378_7ca4_e44a_770c,
+        "{:#018x}",
+        checksum(&sheet)
     );
 }

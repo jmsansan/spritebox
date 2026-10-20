@@ -1,15 +1,19 @@
 //! The text format: parsing and validation into a [`Document`].
 
+mod animation;
+mod chain;
 mod lex;
+mod sprite;
 
 use std::collections::HashMap;
 
-use crate::document::{EMPTY, Layer};
 use crate::{Color, Document, Error, ErrorCode, Limits, Palette, Position, Sprite};
+use animation::AnimationDef;
 use lex::{Node, Token};
+use sprite::SpriteDef;
 
 /// The directives that start a definition.
-const DIRECTIVES: &str = "`palette` or `sprite`";
+const DIRECTIVES: &str = "`palette`, `sprite` or `animation`";
 
 /// Parses `text`. Returns the document, complete when there are no errors, and the
 /// errors ordered by position.
@@ -33,6 +37,7 @@ pub(crate) fn parse(text: &str, limits: &Limits) -> (Document, Vec<Error>) {
         errors,
         palettes: Vec::new(),
         sprites: Vec::new(),
+        animations: Vec::new(),
     };
     for (count, node) in nodes.iter().enumerate() {
         if count == limits.max_definitions {
@@ -64,22 +69,12 @@ struct PaletteDef<'a> {
     colors: Vec<(char, Color)>,
 }
 
-/// A sprite as written, before its keys are checked against its palette.
-struct SpriteDef<'a> {
-    name: Token<'a>,
-    width: u32,
-    height: u32,
-    palette: Option<Token<'a>>,
-    /// The rows of the right width; all of them when `complete`.
-    rows: Vec<Token<'a>>,
-    complete: bool,
-}
-
 struct Parser<'a, 'l> {
     limits: &'l Limits,
     errors: Vec<Error>,
     palettes: Vec<PaletteDef<'a>>,
     sprites: Vec<SpriteDef<'a>>,
+    animations: Vec<AnimationDef<'a>>,
 }
 
 /// The words of a definition's first line after its keyword and name: positional
@@ -218,6 +213,7 @@ impl<'a> Parser<'a, '_> {
         match node.keyword() {
             "palette" => self.palette(node),
             "sprite" => self.sprite(node),
+            "animation" => self.animation(node),
             other => Err(node.line.first().error(
                 ErrorCode::Syntax,
                 format!("Unknown directive `{other}`; expected {DIRECTIVES}"),
@@ -265,168 +261,44 @@ impl<'a> Parser<'a, '_> {
         Ok(())
     }
 
-    fn sprite(&mut self, node: &Node<'a>) -> Parsed<()> {
-        let mut header = Header::new(node, "sprite")?;
-        let size_token = *header.args.first().ok_or_else(|| {
-            header
-                .name
-                .end_error("Expected the sprite's size, such as `16x16`".to_owned())
-        })?;
-        if let Some(extra) = header.args.get(1) {
-            return Err(extra.error(
-                ErrorCode::Syntax,
-                format!("Unexpected `{}` after the sprite's size", extra.text),
-            ));
-        }
-        let (width, height) = size(size_token, self.limits.max_sprite_side)?;
-        let palette = header.option("palette");
-        if let Some(palette) = palette {
-            check_name(palette)?;
-        }
-        let name = header.name;
-        header.finish("sprite", "`palette=`")?;
-        let mut rows = Vec::new();
-        for child in &node.children {
-            let line = &child.line;
-            if line.tokens.len() > 1 || !child.children.is_empty() {
-                self.errors.push(line.first().error(
-                    ErrorCode::Syntax,
-                    "A row of a sprite is one word of palette keys, with no spaces",
-                ));
-                continue;
-            }
-            let row = line.first();
-            let count = row.text.chars().count();
-            if count != width as usize {
-                let (pos, how) = if count < width as usize {
-                    (row.end(), "only")
-                } else {
-                    (row.at(width as usize), "")
-                };
-                let how = if how.is_empty() {
-                    String::new()
-                } else {
-                    format!("{how} ")
-                };
-                self.errors.push(Error::at(
-                    pos,
-                    ErrorCode::SizeMismatch,
-                    format!(
-                        "Row has {how}{count} pixels; sprite `{}` is {width} wide",
-                        name.text
-                    ),
-                ));
-                continue;
-            }
-            rows.push(row);
-        }
-        let written = node.children.len();
-        if written != height as usize {
-            let pos = match node.children.get(height as usize) {
-                Some(extra) => extra.line.first().pos,
-                None => size_token.pos,
-            };
-            self.errors.push(Error::at(
-                pos,
-                ErrorCode::SizeMismatch,
-                format!(
-                    "Sprite `{}` has {written} rows; its size says {height}",
-                    name.text
-                ),
-            ));
-        }
-        // Keep a sprite with errors, so that its rows' keys are checked too.
-        let complete = written == height as usize && rows.len() == written;
-        self.sprites.push(SpriteDef {
-            name,
-            width,
-            height,
-            palette,
-            rows,
-            complete,
-        });
-        Ok(())
-    }
-
     /// Resolves names and builds the document, recording errors.
     fn resolve(&mut self) -> Document {
         let palettes = self.resolve_palettes();
-        let mut sprites: Vec<Sprite> = Vec::new();
-        let mut total_pixels = 0u64;
-        let mut seen: HashMap<&str, Position> = HashMap::new();
-        for def in &self.sprites {
-            if let Some(first) = seen.get(def.name.text) {
-                self.errors.push(duplicate(def.name, "Sprite", *first));
-                continue;
-            }
-            seen.insert(def.name.text, def.name.pos);
-            let palette = match &def.palette {
-                Some(token) => match palettes.iter().find(|p| p.name == token.text) {
-                    Some(p) => p,
-                    None => {
-                        self.errors.push(token.error(
-                            ErrorCode::UnknownName,
-                            format!("Unknown palette `{}`", token.text),
-                        ));
-                        continue;
-                    }
-                },
-                None if palettes.len() == 1 && self.palettes.len() == 1 => &palettes[0],
-                None => {
-                    self.errors.push(def.name.error(
-                        ErrorCode::Syntax,
-                        format!(
-                            "Sprite `{}` needs `palette=NAME`: the file defines {} palettes",
-                            def.name.text,
-                            self.palettes.len()
-                        ),
-                    ));
-                    continue;
-                }
-            };
-            total_pixels += def.width as u64 * def.height as u64;
-            if total_pixels > self.limits.max_image_pixels {
-                self.errors.push(def.name.error(
+        let sprites = self.resolve_sprites(&palettes);
+        let mut budget = self.limits.max_image_pixels;
+        let sprites = self.spend(sprites, &mut budget);
+        let (animations, frame_sprites) = self.resolve_animations(&palettes, &sprites);
+        let frame_sprites = self.spend(frame_sprites, &mut budget);
+        Document {
+            palettes,
+            sprites,
+            frame_sprites,
+            animations,
+        }
+    }
+
+    /// Keeps the sprites whose pixels fit in `budget`, and reports the first that does
+    /// not.
+    fn spend(&mut self, sprites: Vec<(Sprite, Position)>, budget: &mut u64) -> Vec<Sprite> {
+        let mut kept = Vec::with_capacity(sprites.len());
+        for (sprite, pos) in sprites {
+            let pixels = sprite.width as u64 * sprite.height as u64 * sprite.layers.len() as u64;
+            if pixels > *budget {
+                self.errors.push(Error::at(
+                    pos,
                     ErrorCode::LimitExceeded,
                     format!(
                         "The sprites have more than the limit of {} pixels in all",
                         self.limits.max_image_pixels
                     ),
                 ));
+                *budget = 0;
                 break;
             }
-            let mut keys = Vec::with_capacity(def.width as usize * def.height as usize);
-            let mut valid = true;
-            for row in &def.rows {
-                for (x, key) in row.text.chars().enumerate() {
-                    if palette.color(key).is_none() {
-                        self.errors.push(Error::at(
-                            row.at(x),
-                            ErrorCode::UnknownName,
-                            format!("Key `{key}` is not in palette `{}`", palette.name),
-                        ));
-                        valid = false;
-                        break;
-                    }
-                    keys.push(key);
-                }
-            }
-            if valid && def.complete {
-                sprites.push(Sprite {
-                    name: def.name.text.to_owned(),
-                    width: def.width,
-                    height: def.height,
-                    palette: palette.clone(),
-                    layers: vec![Layer { name: None, keys }],
-                });
-            }
+            *budget -= pixels;
+            kept.push(sprite);
         }
-        debug_assert!(
-            sprites
-                .iter()
-                .all(|s| s.layers.iter().all(|l| !l.keys.contains(&EMPTY)))
-        );
-        Document { palettes, sprites }
+        kept
     }
 
     /// Resolves `from=`: a palette starts with the colors of the one it names, then

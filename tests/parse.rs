@@ -292,10 +292,35 @@ fn limits() {
 
 #[test]
 fn never_panics_on_malformed_text() {
-    let base = format!("{DAWN}\nsprite coin 4x2 palette=dawn\n  .ko.\n  kook\n");
+    let base = format!(
+        "{DAWN}\nsprite coin 4x2 palette=dawn\n  layer a\n    .ko.\n    kook\n  layer b = c:pad(1)\n\
+         sprite c = coin:rot90:offset(1,-1):swap(dawn):outline(k)\nanimation x once\n  c:flip_x 6\n"
+    );
     let fragments = [
-        "", " ", "\t", "\n", ";", "(", ")", "=", "x", "#", "é", "palette", "sprite", "from=",
-        "palette=", "0x0", "4x2", "\u{0}",
+        "",
+        " ",
+        "\t",
+        "\n",
+        ";",
+        "(",
+        ")",
+        "=",
+        ":",
+        ",",
+        "x",
+        "#",
+        "é",
+        "palette",
+        "sprite",
+        "layer",
+        "animation",
+        "from=",
+        "palette=",
+        "0x0",
+        "4x2",
+        "\u{0}",
+        "pad(9)",
+        "-1",
     ];
     for i in 0..=base.len() {
         if !base.is_char_boundary(i) {
@@ -308,4 +333,268 @@ fn never_panics_on_malformed_text() {
         }
         let _ = check(&base[..i], &Limits::default());
     }
+}
+
+const FIELD: &str = "\
+palette p
+  .  transparent
+  k  #000000
+  a  #ff0000
+  b  #0000ff80
+palette q
+  .  transparent
+  k  #ffffff
+  a  #00ff00
+  b  #ffff00
+sprite s 3x2 palette=p
+  ka.
+  ..b
+";
+
+/// `FIELD` and `body`, whose first line is line 14.
+fn field(body: &str) -> String {
+    format!("{FIELD}{body}")
+}
+
+fn grid(doc: &Document, name: &str) -> Vec<String> {
+    let s = doc
+        .sprite(name)
+        .unwrap_or_else(|| panic!("no sprite {name}"));
+    (0..s.height())
+        .map(|y| (0..s.width()).map(|x| s.key(x, y).unwrap_or(' ')).collect())
+        .collect()
+}
+
+#[test]
+fn layers() {
+    let doc: Document = field(
+        "sprite l 3x2 palette=p
+  layer under
+    aaa
+    aaa
+  layer over   ; transparent keys let the layer under show
+    .k.
+    ..b
+  layer copy = s:flip_y
+",
+    )
+    .parse()
+    .unwrap();
+    let l = doc.sprite("l").unwrap();
+    let names: Vec<Option<&str>> = l.layer_names().collect();
+    assert_eq!(names, [Some("under"), Some("over"), Some("copy")]);
+    assert_eq!(grid(&doc, "l"), ["akb", "kab"]);
+    let image = l.render();
+    assert_eq!(image.pixel(0, 0), Some(Color::rgb(255, 0, 0)));
+    // Translucent blue over red.
+    assert_eq!(image.pixel(2, 0), Some(Color::rgba(127, 0, 128, 255)));
+}
+
+#[test]
+fn derived_sprites() {
+    let doc: Document = field(
+        "sprite fx = s:flip_x
+sprite fy = s:flip_y
+sprite r = s:rot90:rot180   ; any number of modifiers
+sprite o = s:offset(1,-1)
+sprite padded = s:pad( 1 )
+sprite night = s:swap(q)
+sprite line = s:pad(1):outline(k)
+sprite chain = fx:flip_x    ; from a derived sprite
+",
+    )
+    .parse()
+    .unwrap();
+    assert_eq!(grid(&doc, "fx"), [".ak", "b.."]);
+    assert_eq!(grid(&doc, "fy"), ["..b", "ka."]);
+    assert_eq!(grid(&doc, "r"), [".b", "a.", "k."], "270 degrees clockwise");
+    assert_eq!(grid(&doc, "o"), [" ..", "   "]);
+    assert_eq!(grid(&doc, "padded"), ["     ", " ka. ", " ..b ", "     "]);
+    assert_eq!(grid(&doc, "chain"), grid(&doc, "s"));
+    assert_eq!(grid(&doc, "line"), [" kk  ", "kkak ", " kkbk", "   k "]);
+    let night = doc.sprite("night").unwrap();
+    assert_eq!(night.palette().name(), "q");
+    assert_eq!(night.render().pixel(1, 0), Some(Color::rgb(0, 255, 0)));
+    assert_eq!(doc.sprite("o").unwrap().name(), "o");
+    let names: Vec<&str> = doc.sprites().iter().map(|s| s.name()).collect();
+    assert_eq!(
+        names,
+        [
+            "s", "fx", "fy", "r", "o", "padded", "night", "line", "chain"
+        ]
+    );
+}
+
+#[test]
+fn derived_sprites_may_come_first() {
+    let doc: Document = field("sprite a = b:flip_x\nsprite b = s:rot90\n")
+        .parse()
+        .unwrap();
+    assert_eq!(grid(&doc, "a"), ["k.", "a.", ".b"]);
+}
+
+#[test]
+fn animations() {
+    let doc: Document = field(
+        "animation spin
+  s          6
+  s:flip_x   3   ; a chain builds a frame sprite
+  s:flip_x   3
+animation hit once
+  s:swap(q)  2
+",
+    )
+    .parse()
+    .unwrap();
+    let spin = doc.animation("spin").unwrap();
+    assert!(spin.looping());
+    assert_eq!(spin.total_ticks(), 12);
+    let frames: Vec<(&str, u32)> = spin
+        .frames()
+        .iter()
+        .map(|f| (f.sprite(), f.ticks()))
+        .collect();
+    assert_eq!(frames, [("s", 6), ("s:flip_x", 3), ("s:flip_x", 3)]);
+    let hit = doc.animation("hit").unwrap();
+    assert!(!hit.looping());
+    let built: Vec<&str> = doc.frame_sprites().iter().map(|s| s.name()).collect();
+    assert_eq!(built, ["s:flip_x", "s:swap(q)"]);
+    assert_eq!(grid(&doc, "s:flip_x"), [".ak", "b.."]);
+    assert!(doc.sprites().iter().all(|s| !s.name().contains(':')));
+    let explicit: Document = field("animation a loop\n  s 1\n").parse().unwrap();
+    assert!(explicit.animation("a").unwrap().looping());
+}
+
+#[test]
+fn modifier_errors() {
+    // `field` bodies start on line 14; `sprite x = ` is 11 characters.
+    let e = |chain: &str| error(&field(&format!("sprite x = {chain}\n")));
+    assert_eq!(e("s:spin"), (14, 14, Syntax));
+    assert_eq!(e("s:"), (14, 14, Syntax));
+    assert_eq!(e("s::flip_x"), (14, 14, Syntax));
+    assert_eq!(e(":flip_x"), (14, 12, Syntax));
+    assert_eq!(e("s:flip_x()"), (14, 14, Syntax));
+    assert_eq!(e("s:offset(1)"), (14, 14, Syntax));
+    assert_eq!(e("s:offset(1,x)"), (14, 23, Syntax));
+    assert_eq!(e("s:offset(1,99999)"), (14, 23, InvalidArgument));
+    assert_eq!(e("s:pad(0)"), (14, 18, InvalidArgument));
+    assert_eq!(e("s:pad(1"), (14, 19, Syntax));
+    assert_eq!(e("s:pad(600)"), (14, 14, LimitExceeded));
+    assert_eq!(e("s:pad(500):pad(100)"), (14, 23, LimitExceeded));
+    assert_eq!(e("s:outline(kk)"), (14, 22, Syntax));
+    assert_eq!(e("s:outline(z)"), (14, 14, UnknownName));
+    assert_eq!(e("s:swap(night)"), (14, 19, UnknownName));
+    assert_eq!(e("t:flip_x"), (14, 12, UnknownName));
+    assert_eq!(
+        error(&field("palette r\n  k #000000\nsprite x = s:swap(r)\n")),
+        (16, 19, UnknownName)
+    );
+    assert_eq!(
+        error(&field("sprite x = s:flip_x extra\n")),
+        (14, 21, Syntax)
+    );
+    assert_eq!(error(&field("sprite x =\n")), (14, 11, Syntax));
+    assert_eq!(error(&field("sprite x = s\n  ka.\n")), (15, 3, Syntax));
+}
+
+#[test]
+fn derivation_errors() {
+    assert_eq!(
+        errors(&field("sprite a = b:flip_x\nsprite b = a:flip_y\n")),
+        vec![(15, 12, Cycle)]
+    );
+    assert_eq!(error(&field("sprite a = a\n")), (14, 12, Cycle));
+    assert_eq!(
+        error(&field("sprite s = s:flip_x\n")),
+        (14, 8, DuplicateName)
+    );
+    // Sprites built from a sprite with errors fail without errors of their own.
+    assert_eq!(
+        errors(&field(
+            "sprite bad 2x1 palette=p\n  kz\nsprite a = bad:flip_x\nanimation x\n  bad 1\n  a:flip_y 1\n"
+        )),
+        vec![(15, 4, UnknownName)]
+    );
+    let limits = Limits {
+        max_nesting: 2,
+        ..Limits::default()
+    };
+    let text = field("sprite a = s:flip_x\nsprite b = a:flip_x\nsprite c = b:flip_x\n");
+    assert_eq!(errors_with(&text, &limits), vec![(16, 12, LimitExceeded)]);
+}
+
+#[test]
+fn layer_errors() {
+    let e = |body: &str| error(&field(body));
+    assert_eq!(
+        e("sprite l 3x2 palette=p\n  layer a\n    ka.\n    ..b\n  ka.\n"),
+        (18, 3, Syntax)
+    );
+    assert_eq!(
+        e("sprite l 3x2 palette=p\n  layer a\n    ka.\n"),
+        (15, 10, SizeMismatch)
+    );
+    assert_eq!(
+        e("sprite l 3x2 palette=p\n  layer a\n    ka.\n    ..\n"),
+        (17, 7, SizeMismatch)
+    );
+    assert_eq!(
+        e("sprite l 3x2 palette=p\n  layer a\n    ka.\n    ..b\n  layer a\n    ka.\n    ..b\n"),
+        (18, 9, DuplicateName)
+    );
+    assert_eq!(
+        e("sprite l 2x2 palette=p\n  layer a = s\n"),
+        (15, 13, SizeMismatch)
+    );
+    assert_eq!(
+        e("sprite l 3x2 palette=q\n  layer a = s\n"),
+        (15, 13, InvalidArgument)
+    );
+    assert_eq!(
+        e("sprite l 3x2 palette=p\n  layer a = s x\n"),
+        (15, 15, Syntax)
+    );
+    assert_eq!(
+        e("sprite l 3x2 palette=p\n  layer a extra\n"),
+        (15, 11, Syntax)
+    );
+    assert_eq!(
+        e("sprite l 3x2 palette=p\n  layer a = s\n    ka.\n"),
+        (16, 5, Syntax)
+    );
+    let limits = Limits {
+        max_layers: 2,
+        ..Limits::default()
+    };
+    let three = field("sprite l 3x2 palette=p\n  layer a = s\n  layer b = s\n  layer c = s\n");
+    assert_eq!(errors_with(&three, &limits), vec![(17, 3, LimitExceeded)]);
+    let nested = field("sprite l 3x2 palette=p\n  layer a = s:outline(k)\n  layer b = s\n");
+    assert_eq!(errors_with(&nested, &limits), vec![(14, 8, LimitExceeded)]);
+}
+
+#[test]
+fn animation_errors() {
+    let e = |body: &str| error(&field(body));
+    assert_eq!(e("animation\n"), (14, 10, Syntax));
+    assert_eq!(e("animation a\n"), (14, 11, Syntax));
+    assert_eq!(e("animation a forever\n  s 1\n"), (14, 13, Syntax));
+    assert_eq!(e("animation a loop once\n  s 1\n"), (14, 18, Syntax));
+    assert_eq!(e("animation a\n  s\n"), (15, 4, Syntax));
+    assert_eq!(e("animation a\n  s 0\n"), (15, 5, InvalidArgument));
+    assert_eq!(e("animation a\n  s 65536\n"), (15, 5, InvalidArgument));
+    assert_eq!(e("animation a\n  s six\n"), (15, 5, Syntax));
+    assert_eq!(e("animation a\n  s 6 6\n"), (15, 7, Syntax));
+    assert_eq!(e("animation a\n  t 6\n"), (15, 3, UnknownName));
+    assert_eq!(e("animation a\n  s:spin 6\n"), (15, 5, Syntax));
+    assert_eq!(e("animation a\n  s 6\n    s 6\n"), (16, 5, Syntax));
+    assert_eq!(
+        e("animation a\n  s 6\nanimation a\n  s 6\n"),
+        (16, 11, DuplicateName)
+    );
+    let limits = Limits {
+        max_frames: 2,
+        ..Limits::default()
+    };
+    let three = field("animation a\n  s 1\n  s 1\n  s 1\n");
+    assert_eq!(errors_with(&three, &limits), vec![(17, 3, LimitExceeded)]);
 }

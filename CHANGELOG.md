@@ -12,6 +12,13 @@
 - `png`: a deterministic encoder that writes indexed PNG for pixel art, and a
   decoder for every standard PNG, with the crate's own DEFLATE, zlib, CRC-32 and
   Adler-32.
-- Preview sheets of a document's sprites, labelled in a built-in pixel font.
+- Layers: rows of keys, or other sprites through modifier chains, composited in
+  order.
+- Derived sprites and modifier chains: `flip_x`, `flip_y`, `rot90`, `rot180`,
+  `rot270`, `offset(dx,dy)`, `pad(n)`, `swap(palette)` and `outline(key)`, also as
+  methods of `Sprite`.
+- Animations: frames of sprites or chains with ticks, looping or once.
+- Preview sheets of a document's sprites and animations, labelled in a built-in
+  pixel font.
 - The `spritebox` command: `check` and `render`, with JSON diagnostics and stable
   exit statuses.

@@ -84,6 +84,34 @@ pub(crate) fn sheet(
                 .collect(),
         });
     }
+    if !document.animations.is_empty() {
+        sections.push(Section {
+            title: "Animations".into(),
+            groups: document
+                .animations
+                .iter()
+                .map(|a| Group {
+                    label: format!(
+                        "{} {} {}t",
+                        a.name,
+                        if a.looping { "loop" } else { "once" },
+                        a.total_ticks()
+                    ),
+                    items: a
+                        .frames
+                        .iter()
+                        .map(|f| Item {
+                            image: document
+                                .sprite(&f.sprite)
+                                .map(|s| s.render())
+                                .unwrap_or_else(|| Image::blank(1, 1)),
+                            caption: Some(format!("{}t", f.ticks)),
+                        })
+                        .collect(),
+                })
+                .collect(),
+        });
+    }
     if sections.is_empty() {
         sections.push(Section {
             title: "Nothing to show".into(),

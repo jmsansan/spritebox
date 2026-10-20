@@ -1,6 +1,6 @@
 //! 2D pixel art as plain text, in safe Rust with zero dependencies.
 //!
-//! A spritebox file defines palettes and sprites as text that a person or an AI
+//! A spritebox file defines palettes, sprites and animations as text that a person or an AI
 //! assistant can write, read and diff. The crate validates it with exact
 //! diagnostics, renders it to RGBA8 images and PNG files, and draws preview sheets to
 //! review a whole file at a glance. The same text gives the same pixels on every
@@ -69,6 +69,36 @@
 //! `WxH` is the size in pixels, and each of the `H` rows is one word of `W` keys of
 //! the palette. `palette=` may be left out when the file defines one palette.
 //!
+//! Instead of rows, a sprite may have layers, drawn bottom first, each with rows or
+//! made from another sprite of the same size and palette:
+//!
+//! ```text
+//! sprite hero 16x16 palette=dawn
+//!   layer body
+//!     ...
+//!   layer shadow = blob:offset(1,1)
+//! ```
+//!
+//! ## Derived sprites
+//!
+//! `sprite NAME = CHAIN` builds a sprite from another with a modifier chain: a name
+//! and `:modifier`s applied left to right, without spaces, such as
+//! `coin:flip_x:swap(dusk):outline(k)`. The modifiers are `flip_x`, `flip_y`, `rot90`,
+//! `rot180`, `rot270` (clockwise), `offset(dx,dy)`, `pad(n)`, `swap(palette)` and
+//! `outline(key)`; [`Sprite`] has a method for each.
+//!
+//! ## Animations
+//!
+//! ```text
+//! animation coin_spin loop
+//!   coin              6
+//!   coin_edge         6
+//!   coin_edge:flip_x  6
+//! ```
+//!
+//! One frame per line: a sprite or a modifier chain, and the ticks it shows (Diamon
+//! steps at 60 a second). `loop`, the default, or `once`.
+//!
 //! # Errors
 //!
 //! Errors are [`Error`] values with a stable [`ErrorCode`] and, for text, the
@@ -90,10 +120,12 @@ mod label;
 mod limits;
 pub mod png;
 mod preview;
+mod sprite;
 mod text;
 
-pub use document::{Document, Palette, Sprite, check};
+pub use document::{Animation, Document, Frame, check};
 pub use error::{Error, ErrorCode, Position, Result};
 pub use image::{Color, Image};
 pub use limits::Limits;
 pub use preview::PreviewOptions;
+pub use sprite::{Palette, Sprite};

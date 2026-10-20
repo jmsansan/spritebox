@@ -1,122 +1,51 @@
 use std::str::FromStr;
 
-use crate::{Color, Error, Image, Limits, PreviewOptions, Result};
+use crate::{Error, Image, Limits, Palette, PreviewOptions, Result, Sprite};
 
-/// A named set of colors, each under a one-character key.
+/// An animation: frames shown in order, each for a number of ticks.
+///
+/// A tick is one step of the game's fixed update; Diamon steps at 60 ticks a second.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Palette {
+pub struct Animation {
     pub(crate) name: String,
-    pub(crate) colors: Vec<(char, Color)>,
+    pub(crate) frames: Vec<Frame>,
+    pub(crate) looping: bool,
 }
 
-impl Palette {
+impl Animation {
     pub fn name(&self) -> &str {
         &self.name
     }
-    /// The keys and their colors, inherited keys first, in the order written.
-    pub fn colors(&self) -> &[(char, Color)] {
-        &self.colors
+    pub fn frames(&self) -> &[Frame] {
+        &self.frames
     }
-    /// The color of `key`, if the palette has it.
-    pub fn color(&self, key: char) -> Option<Color> {
-        self.colors.iter().find(|(k, _)| *k == key).map(|&(_, c)| c)
+    /// Whether the animation starts again after its last frame (`loop`), or stays on
+    /// it (`once`).
+    pub fn looping(&self) -> bool {
+        self.looping
+    }
+    /// The ticks of all frames together.
+    pub fn total_ticks(&self) -> u64 {
+        self.frames.iter().map(|f| f.ticks as u64).sum()
     }
 }
 
-/// Marks a pixel that no key covers in a layer.
-pub(crate) const EMPTY: char = '\0';
-
-/// One layer of a sprite: a key for each pixel, row by row, or [`EMPTY`].
+/// One frame of an [`Animation`].
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct Layer {
-    pub name: Option<String>,
-    pub keys: Vec<char>,
+pub struct Frame {
+    pub(crate) sprite: String,
+    pub(crate) ticks: u32,
 }
 
-/// A sprite: a grid of palette keys in one or more layers, and the palette that
-/// colors them.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Sprite {
-    pub(crate) name: String,
-    pub(crate) width: u32,
-    pub(crate) height: u32,
-    pub(crate) palette: Palette,
-    pub(crate) layers: Vec<Layer>,
-}
-
-impl Sprite {
-    pub fn name(&self) -> &str {
-        &self.name
+impl Frame {
+    /// The frame's sprite: a sprite's name, or a modifier chain such as
+    /// `coin:flip_x`, which [`Document::sprite`] finds too.
+    pub fn sprite(&self) -> &str {
+        &self.sprite
     }
-    pub fn width(&self) -> u32 {
-        self.width
-    }
-    pub fn height(&self) -> u32 {
-        self.height
-    }
-    /// The palette that colors the sprite's keys.
-    pub fn palette(&self) -> &Palette {
-        &self.palette
-    }
-    /// The key of the topmost layer that covers `(x, y)`, or `None` where no layer
-    /// does or outside the sprite.
-    pub fn key(&self, x: u32, y: u32) -> Option<char> {
-        if x >= self.width || y >= self.height {
-            return None;
-        }
-        let i = y as usize * self.width as usize + x as usize;
-        self.layers
-            .iter()
-            .rev()
-            .map(|layer| layer.keys[i])
-            .find(|&k| k != EMPTY)
-    }
-
-    /// Renders the sprite to RGBA8: each layer's keys are colored by the palette and
-    /// the layers are drawn over each other in order with [`Color::over`].
-    pub fn render(&self) -> Image {
-        let mut lookup = ColorLookup::new(&self.palette);
-        let mut image = Image::blank(self.width, self.height);
-        for layer in &self.layers {
-            for (i, &key) in layer.keys.iter().enumerate() {
-                if key == EMPTY {
-                    continue;
-                }
-                let color = lookup.get(key);
-                let w = self.width as usize;
-                let (x, y) = ((i % w) as u32, (i / w) as u32);
-                if let Some(below) = image.pixel(x, y) {
-                    image.set_pixel(x, y, color.over(below));
-                }
-            }
-        }
-        image
-    }
-}
-
-/// Colors of palette keys, with a table for ASCII keys.
-struct ColorLookup<'a> {
-    palette: &'a Palette,
-    ascii: [Option<Color>; 128],
-}
-
-impl<'a> ColorLookup<'a> {
-    fn new(palette: &'a Palette) -> Self {
-        let mut ascii = [None; 128];
-        for &(key, color) in palette.colors.iter().rev() {
-            if key.is_ascii() {
-                ascii[key as usize] = Some(color);
-            }
-        }
-        Self { palette, ascii }
-    }
-    fn get(&mut self, key: char) -> Color {
-        let found = if key.is_ascii() {
-            self.ascii[key as usize]
-        } else {
-            self.palette.color(key)
-        };
-        found.unwrap_or(Color::TRANSPARENT)
+    /// How many ticks the frame shows, at least 1.
+    pub fn ticks(&self) -> u32 {
+        self.ticks
     }
 }
 
@@ -145,6 +74,8 @@ impl<'a> ColorLookup<'a> {
 pub struct Document {
     pub(crate) palettes: Vec<Palette>,
     pub(crate) sprites: Vec<Sprite>,
+    pub(crate) frame_sprites: Vec<Sprite>,
+    pub(crate) animations: Vec<Animation>,
 }
 
 impl Document {
@@ -170,12 +101,29 @@ impl Document {
     pub fn palette(&self, name: &str) -> Option<&Palette> {
         self.palettes.iter().find(|p| p.name == name)
     }
-    /// The sprites, in the order they are defined.
+    /// The named sprites, drawn or derived, in the order they are defined.
     pub fn sprites(&self) -> &[Sprite] {
         &self.sprites
     }
+    /// A named sprite, or a sprite that an animation frame builds with a modifier
+    /// chain, such as `coin:flip_x`.
     pub fn sprite(&self, name: &str) -> Option<&Sprite> {
-        self.sprites.iter().find(|s| s.name == name)
+        self.sprites
+            .iter()
+            .chain(&self.frame_sprites)
+            .find(|s| s.name == name)
+    }
+    /// The sprites that animation frames build with modifier chains, in the order
+    /// they are first used. Their names are the chains, written without spaces.
+    pub fn frame_sprites(&self) -> &[Sprite] {
+        &self.frame_sprites
+    }
+    /// The animations, in the order they are defined.
+    pub fn animations(&self) -> &[Animation] {
+        &self.animations
+    }
+    pub fn animation(&self, name: &str) -> Option<&Animation> {
+        self.animations.iter().find(|a| a.name == name)
     }
 
     /// Draws a preview sheet: every definition, scaled up, on a grid and labelled with
