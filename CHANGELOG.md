@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.2.0
+
+Procedural textures, the last step of the initial plan, and a fix for Windows.
 
 ### Added
 
