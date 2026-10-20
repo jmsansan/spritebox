@@ -1,5 +1,8 @@
 # spritebox
 
+[![crates.io](https://img.shields.io/crates/v/spritebox.svg)](https://crates.io/crates/spritebox)
+[![docs.rs](https://docs.rs/spritebox/badge.svg)](https://docs.rs/spritebox)
+[![CI](https://github.com/jmsansan/spritebox/actions/workflows/ci.yml/badge.svg)](https://github.com/jmsansan/spritebox/actions/workflows/ci.yml)
 [![MSRV 1.85](https://img.shields.io/badge/rust-1.85%2B-blue.svg)](#install)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -740,7 +743,10 @@ fn parse_trusted(text: &str) -> spritebox::Result<Document> {
 
 ## Limitations
 
-- No procedural textures yet; see the capability table for what comes next.
+What spritebox does not do, as of this release:
+
+- No procedural textures (seeded noise and dithering) yet; they are planned.
+- No drawing tools or editor: art is text, reviewed through preview sheets.
 - Fonts are one weight and style, without kerning, ligatures or hinting; outlines
   are exact squares, so they are crisp at integer multiples of the pixel size and
   blur in between, like any pixel font.
