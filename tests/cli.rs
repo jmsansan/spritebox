@@ -1,0 +1,178 @@
+//! The command-line tool: exit statuses, diagnostics and written files.
+
+use std::io::Write as _;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Output, Stdio};
+
+fn spritebox(args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_spritebox"))
+        .args(args)
+        .output()
+        .expect("the binary runs")
+}
+
+fn stdout(output: &Output) -> String {
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+fn stderr(output: &Output) -> String {
+    String::from_utf8_lossy(&output.stderr).into_owned()
+}
+
+/// A fresh directory for one test.
+fn temp_dir(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("spritebox-cli-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+fn write(dir: &Path, name: &str, text: &str) -> String {
+    let path = dir.join(name);
+    std::fs::write(&path, text).unwrap();
+    path.display().to_string()
+}
+
+const COIN: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/examples/coin.spritebox");
+const BAD: &str = "palette p\n  k #000\nsprite s 2x1 palette=p\n  kx\n";
+
+#[test]
+fn check_valid_file() {
+    let out = spritebox(&["check", COIN]);
+    assert_eq!(out.status.code(), Some(0));
+    assert!(stdout(&out).ends_with(": ok\n"), "{}", stdout(&out));
+    let out = spritebox(&["check", COIN, "--json"]);
+    assert_eq!(out.status.code(), Some(0));
+    let json = stdout(&out);
+    assert!(json.starts_with("{\"version\":1,\"file\":"), "{json}");
+    assert!(
+        json.contains("\"ok\":true,\"diagnostics\":[],\"written\":[]}"),
+        "{json}"
+    );
+}
+
+#[test]
+fn check_invalid_file() {
+    let dir = temp_dir("invalid");
+    let file = write(&dir, "bad.spritebox", BAD);
+    let out = spritebox(&["check", &file]);
+    assert_eq!(out.status.code(), Some(1));
+    let text = stderr(&out);
+    assert!(
+        text.contains(&format!(
+            "{file}:2:5: error[invalid_argument]: Color `#000`"
+        )),
+        "{text}"
+    );
+    assert!(
+        text.contains(&format!("{file}:4:4: error[unknown_name]: Key `x`")),
+        "{text}"
+    );
+    assert!(text.ends_with(": 2 errors\n"), "{text}");
+
+    let out = spritebox(&["check", "--json", &file]);
+    assert_eq!(out.status.code(), Some(1));
+    let json = stdout(&out);
+    assert!(json.contains("\"ok\":false"), "{json}");
+    assert!(json.contains(
+        "{\"code\":\"invalid_argument\",\"line\":2,\"column\":5,\"message\":\"Color `#000` must be `#rrggbb`, `#rrggbbaa` or `transparent`\"}"
+    ), "{json}");
+    assert!(
+        json.contains("{\"code\":\"unknown_name\",\"line\":4,\"column\":4,"),
+        "{json}"
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn check_reads_standard_input_and_rejects_bad_utf8() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_spritebox"))
+        .args(["check", "-", "--json"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"palette p\n  k #000000\n  \xff #000000\n")
+        .unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let json = stdout(&out);
+    assert!(json.contains("\"file\":\"<stdin>\""), "{json}");
+    assert!(json.contains("{\"code\":\"syntax\",\"line\":3,\"column\":3,\"message\":\"The text is not valid UTF-8\"}"), "{json}");
+}
+
+#[test]
+fn render_writes_files() {
+    let dir = temp_dir("render");
+    let out = spritebox(&[
+        "render",
+        COIN,
+        "--out",
+        dir.to_str().unwrap(),
+        "--scale",
+        "2",
+        "--json",
+    ]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let json = stdout(&out);
+    for name in [
+        "preview.png",
+        "sprites/coin.png",
+        "sprites/coin_dusk.png",
+        "sprites/gem.png",
+    ] {
+        let path = dir.join(name);
+        assert!(json.contains(&path.display().to_string()), "{json}");
+        let image = spritebox::png::read_file(&path).unwrap();
+        assert!(image.width() > 0);
+    }
+    let coin = spritebox::png::read_file(dir.join("sprites/coin.png")).unwrap();
+    assert_eq!((coin.width(), coin.height()), (8, 8));
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn render_does_not_write_invalid_files() {
+    let dir = temp_dir("render-invalid");
+    let file = write(&dir, "bad.spritebox", BAD);
+    let out_dir = dir.join("out");
+    let out = spritebox(&["render", &file, "--out", out_dir.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(!out_dir.exists());
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn usage_and_io_errors() {
+    for args in [
+        &[][..],
+        &["draw", COIN],
+        &["check"],
+        &["check", COIN, "--frobnicate"],
+        &["check", COIN, COIN],
+        &["render", COIN],
+        &["render", COIN, "--out"],
+        &["render", COIN, "--out", "x", "--scale", "0"],
+        &["check", COIN, "--out", "x"],
+    ] {
+        let out = spritebox(args);
+        assert_eq!(out.status.code(), Some(2), "{args:?}");
+        assert!(stderr(&out).contains("Usage:"), "{args:?}");
+    }
+    let out = spritebox(&["check", "/no/such/file.spritebox", "--json"]);
+    assert_eq!(out.status.code(), Some(3));
+    assert!(stdout(&out).contains("\"code\":\"io\""), "{}", stdout(&out));
+
+    let out = spritebox(&["--help"]);
+    assert_eq!(out.status.code(), Some(0));
+    assert!(stdout(&out).contains("spritebox check <file>"));
+    let out = spritebox(&["--version"]);
+    assert_eq!(
+        stdout(&out),
+        format!("spritebox {}\n", env!("CARGO_PKG_VERSION"))
+    );
+}
