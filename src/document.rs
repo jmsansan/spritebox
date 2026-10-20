@@ -1,8 +1,8 @@
 use std::str::FromStr;
 
 use crate::{
-    Atlas, AtlasOptions, Error, Export, ExportOptions, Image, Limits, Palette, PreviewOptions,
-    Result, Sprite, Tilemap, Tileset,
+    Atlas, AtlasOptions, Error, Export, ExportOptions, Font, Image, Limits, Palette,
+    PreviewOptions, Result, Sprite, Tilemap, Tileset,
 };
 
 /// An animation: frames shown in order, each for a number of ticks.
@@ -81,6 +81,7 @@ pub struct Document {
     pub(crate) animations: Vec<Animation>,
     pub(crate) tilesets: Vec<Tileset>,
     pub(crate) tilemaps: Vec<Tilemap>,
+    pub(crate) fonts: Vec<Font>,
 }
 
 impl Document {
@@ -143,6 +144,13 @@ impl Document {
     }
     pub fn tilemap(&self, name: &str) -> Option<&Tilemap> {
         self.tilemaps.iter().find(|t| t.name == name)
+    }
+    /// The fonts, in the order they are defined.
+    pub fn fonts(&self) -> &[Font] {
+        &self.fonts
+    }
+    pub fn font(&self, name: &str) -> Option<&Font> {
+        self.fonts.iter().find(|f| f.name == name)
     }
 
     /// Packs every sprite, and every sprite that animation frames build, into one

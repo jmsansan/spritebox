@@ -31,6 +31,8 @@ pub struct Limits {
     pub max_tiles: usize,
     /// Width or height of one tilemap in tiles. Default 1024.
     pub max_map_side: u32,
+    /// Glyphs in one font. Default 4096.
+    pub max_glyphs: usize,
     /// Depth of definitions built on other definitions: palettes copied `from=`
     /// another, and sprites derived from sprites. Default 32.
     pub max_nesting: usize,
@@ -53,6 +55,7 @@ impl Default for Limits {
             max_frames: 1024,
             max_tiles: 4096,
             max_map_side: 1024,
+            max_glyphs: 4096,
             max_nesting: 32,
             max_image_side: 8192,
             max_image_pixels: 16 * 1024 * 1024,

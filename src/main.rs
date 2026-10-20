@@ -6,7 +6,8 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use spritebox::{
-    AtlasOptions, Document, Error, ErrorCode, ExportOptions, Limits, Position, PreviewOptions, png,
+    AtlasOptions, Document, Error, ErrorCode, ExportOptions, Limits, Position, PreviewOptions,
+    TtfOptions, png,
 };
 
 const USAGE: &str = "\
@@ -17,7 +18,10 @@ Usage:
       Validate a file and print its diagnostics.
   spritebox render <file> --out <dir> [--scale <n>] [--padding <n>] [--extrude] [--json]
       Validate a file, then write atlas.png, tileset-<name>.png for each
-      tileset, spritebox.json (the metadata) and preview.png to <dir>.
+      tileset, font-<name>.ttf for each font, spritebox.json (the metadata)
+      and preview.png to <dir>.
+  spritebox font <file> --out <font.ttf> [--font <name>] [--family <name>] [--json]
+      Validate a file, then write one of its fonts as TrueType.
 
 <file> may be `-` for standard input.
 
@@ -27,6 +31,8 @@ Options:
   --scale <n>   Pixels per sprite pixel in the preview, 1..=64 (default 4).
   --padding <n> Empty pixels around each sprite in the atlas, 0..=64 (default 1).
   --extrude     Fill the atlas padding with copies of edge pixels.
+  --font <name> The font to write, when the file has several.
+  --family <n>  The family name in the TrueType file (default: the font's name).
   -h, --help    Print this help.
   -V, --version Print the version.
 
@@ -43,6 +49,8 @@ struct Options {
     out: Option<PathBuf>,
     scale: u32,
     atlas: AtlasOptions,
+    font: Option<String>,
+    family: Option<String>,
     json: bool,
 }
 
@@ -70,13 +78,15 @@ fn main() -> ExitCode {
 fn parse_args(args: &[String]) -> Result<Options, String> {
     let mut iter = args.iter();
     let command = iter.next().ok_or("missing command")?.clone();
-    if command != "check" && command != "render" {
+    if !["check", "render", "font"].contains(&command.as_str()) {
         return Err(format!("unknown command `{command}`"));
     }
     let mut file = None;
     let mut out = None;
     let mut scale = PreviewOptions::default().scale;
     let mut atlas = AtlasOptions::default();
+    let mut font = None;
+    let mut family = None;
     let mut json = false;
     while let Some(arg) = iter.next() {
         match arg.as_str() {
@@ -99,6 +109,8 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
                     .ok_or(format!("--padding must be 0..=64, not `{value}`"))?;
             }
             "--extrude" => atlas.extrude = true,
+            "--font" => font = Some(iter.next().ok_or("--font needs a name")?.clone()),
+            "--family" => family = Some(iter.next().ok_or("--family needs a name")?.clone()),
             _ if arg.starts_with("--") => return Err(format!("unknown option `{arg}`")),
             _ if file.is_none() => file = Some(arg.clone()),
             _ => return Err(format!("unexpected argument `{arg}`")),
@@ -108,11 +120,17 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
     if command == "render" && out.is_none() {
         return Err("render needs --out <dir>".into());
     }
-    if command == "check" && out.is_some() {
-        return Err("check writes no files; --out is for render".into());
+    if command == "font" && out.is_none() {
+        return Err("font needs --out <font.ttf>".into());
     }
-    if command == "check" && atlas != AtlasOptions::default() {
+    if command == "check" && out.is_some() {
+        return Err("check writes no files; --out is for render and font".into());
+    }
+    if command != "render" && atlas != AtlasOptions::default() {
         return Err("--padding and --extrude are for render".into());
+    }
+    if command != "font" && (font.is_some() || family.is_some()) {
+        return Err("--font and --family are for the font command".into());
     }
     Ok(Options {
         command,
@@ -120,6 +138,8 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
         out,
         scale,
         atlas,
+        font,
+        family,
         json,
     })
 }
@@ -143,17 +163,65 @@ fn run(options: &Options) -> ExitCode {
         Err(error) => return report(options, &[error], &[], EXIT_INVALID),
     };
     let out = options.out.as_deref().unwrap_or(Path::new("."));
-    match render(&document, out, options, &limits) {
+    let result = if options.command == "font" {
+        write_font(&document, out, options)
+    } else {
+        render(&document, out, options, &limits)
+    };
+    match result {
         Ok(written) => report(options, &[], &written, 0),
         Err(error) => {
-            let status = if error.code == ErrorCode::Io {
-                EXIT_IO
-            } else {
-                EXIT_INVALID
+            let status = match error.code {
+                ErrorCode::Io => EXIT_IO,
+                ErrorCode::InvalidArgument if options.command == "font" => EXIT_USAGE,
+                _ => EXIT_INVALID,
             };
             report(options, &[error], &[], status)
         }
     }
+}
+
+/// Writes the chosen font to `out`. A missing or ambiguous font is an
+/// `InvalidArgument` error, reported with the usage exit status.
+fn write_font(document: &Document, out: &Path, options: &Options) -> Result<Vec<PathBuf>, Error> {
+    let fonts = document.fonts();
+    let font = match &options.font {
+        Some(name) => document.font(name).ok_or_else(|| {
+            Error::new(
+                ErrorCode::InvalidArgument,
+                format!("The file has no font `{name}`"),
+            )
+        })?,
+        None if fonts.len() == 1 => &fonts[0],
+        None => {
+            return Err(Error::new(
+                ErrorCode::InvalidArgument,
+                format!(
+                    "The file defines {} fonts; choose one with --font <name>",
+                    fonts.len()
+                ),
+            ));
+        }
+    };
+    let ttf = font.to_ttf(&TtfOptions {
+        family: options.family.clone(),
+        ..TtfOptions::default()
+    })?;
+    if let Some(parent) = out.parent().filter(|p| !p.as_os_str().is_empty()) {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            Error::new(
+                ErrorCode::Io,
+                format!("Cannot write {}: {e}", parent.display()),
+            )
+        })?;
+    }
+    std::fs::write(out, ttf).map_err(|e| {
+        Error::new(
+            ErrorCode::Io,
+            format!("Cannot write {}: {e}", out.display()),
+        )
+    })?;
+    Ok(vec![out.to_path_buf()])
 }
 
 /// Reads the input; the inner error is text that is not UTF-8.

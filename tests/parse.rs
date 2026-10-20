@@ -299,7 +299,8 @@ fn never_panics_on_malformed_text() {
          tileset t 2x2 palette=dawn columns=3\n  tile a\n    ko\n    ok\n  tile b = dot:flip_x\n\
          \x20 terrain d 16\n    island = dot\n    h_strip\n      kk\n      oo\n    v_strip = dot:rot90\n\
          \x20   fill = dot\ntilemap m outside=empty\n  legend\n    . empty\n    # d solid\n    a a\n\
-         \x20 map\n    .#a\n    ##.\n"
+         \x20 map\n    .#a\n    ##.\nfont f height=2 baseline=1 spacing=2\n  glyph A advance=3\n    #.\n    ##\n\
+         \x20 glyph U+003B\n    #\n    #\n"
     );
     let base_errors = check(&base, &Limits::default());
     assert!(base_errors.is_empty(), "{base_errors:?}");
@@ -612,6 +613,7 @@ fn random_edits_never_panic() {
         include_str!("../examples/coin.spritebox"),
         include_str!("../examples/showcase.spritebox"),
         include_str!("../examples/tiles.spritebox"),
+        include_str!("../examples/font.spritebox"),
     ];
     let alphabet: Vec<char> = " \n\t.#kKo=:;(),-_x0123456789abcdefgélsupwy"
         .chars()

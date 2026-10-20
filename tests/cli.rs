@@ -187,6 +187,51 @@ fn render_writes_tilesets() {
 }
 
 #[test]
+fn font_writes_truetype() {
+    let dir = temp_dir("font");
+    let font = concat!(env!("CARGO_MANIFEST_DIR"), "/examples/font.spritebox");
+    let path = dir.join("nested/hud.ttf");
+    let out = spritebox(&[
+        "font",
+        font,
+        "--out",
+        path.to_str().unwrap(),
+        "--family",
+        "HUD Pixel",
+        "--json",
+    ]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let doc = spritebox::Document::parse(&std::fs::read_to_string(font).unwrap()).unwrap();
+    let expected = doc
+        .font("hud")
+        .unwrap()
+        .to_ttf(&spritebox::TtfOptions {
+            family: Some("HUD Pixel".into()),
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), expected);
+    assert!(stdout(&out).contains("hud.ttf"));
+
+    // Several fonts need --font; an unknown font is bad usage too.
+    let two = write(&dir, "two.spritebox", "font a height=1\nfont b height=1\n");
+    let ttf = dir.join("x.ttf");
+    let out = spritebox(&["font", &two, "--out", ttf.to_str().unwrap(), "--json"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(
+        stdout(&out).contains("choose one with --font"),
+        "{}",
+        stdout(&out)
+    );
+    let out = spritebox(&["font", &two, "--out", ttf.to_str().unwrap(), "--font", "c"]);
+    assert_eq!(out.status.code(), Some(2));
+    let out = spritebox(&["font", &two, "--out", ttf.to_str().unwrap(), "--font", "b"]);
+    assert_eq!(out.status.code(), Some(0));
+    assert!(ttf.exists());
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn render_does_not_write_invalid_files() {
     let dir = temp_dir("render-invalid");
     let file = write(&dir, "bad.spritebox", BAD);
@@ -210,6 +255,8 @@ fn usage_and_io_errors() {
         &["render", COIN, "--out", "x", "--scale", "0"],
         &["check", COIN, "--out", "x"],
         &["check", COIN, "--extrude"],
+        &["font", COIN],
+        &["render", COIN, "--out", "x", "--font", "hud"],
         &["render", COIN, "--out", "x", "--padding", "65"],
     ] {
         let out = spritebox(args);

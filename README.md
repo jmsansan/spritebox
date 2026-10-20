@@ -4,12 +4,12 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 **2D pixel art as plain text, in safe Rust with zero dependencies: palettes, sprites,
-animations, autotiled tilesets and tilemaps written as text, validated with exact
-diagnostics, and rendered to RGBA images, PNG files, atlases with their metadata,
-and preview sheets.**
+animations, autotiled tilesets, tilemaps and pixel fonts written as text, validated
+with exact diagnostics, and rendered to RGBA images, PNG files, atlases with their
+metadata, TrueType fonts and preview sheets.**
 
 No C libraries, build scripts or `unsafe`: only the standard library, with its own
-PNG encoder and decoder, DEFLATE, CRC-32 and Adler-32. The same text gives the same
+PNG encoder and decoder, DEFLATE, CRC-32, Adler-32 and TrueType writer. The same text gives the same
 pixels and the same PNG bytes on every platform.
 
 spritebox is designed first for AI-assisted development. An assistant cannot draw
@@ -33,9 +33,9 @@ which does the same for game audio.
 | Tilesets, with 16- and 47-variant autotiling from 4 or 5 hand-drawn pieces | Available |
 | Tilemaps: grids of tile indices from a legend, autotiled, with solid tiles | Available |
 | Atlases: packed sprites and frames with padding; metadata as Rust structs and JSON | Available |
+| Pixel fonts: glyph grids, text drawing, and TrueType export | Available |
 | Preview sheets | Available (sprites, animations) |
 | Command-line tool: `check`, `render` | Available |
-| Pixel fonts with TrueType export | Planned |
 | Seeded procedural textures: value noise and ordered dithering | Planned |
 
 ## Install
@@ -356,6 +356,60 @@ tilemap level tileset=ground
   key and not under another. `tileset=` may be left out when the file has one
   tileset.
 
+### Pixel fonts
+
+![The preview sheet of examples/font.spritebox](https://raw.githubusercontent.com/jmsansan/spritebox/main/docs/font-preview.png)
+
+`font NAME height=H [baseline=B] [line_height=L] [spacing=S] [space=N]`, then a
+`glyph` for each character, with rows of `#` (ink) and `.` (none):
+
+```text
+font hud height=7 baseline=7 line_height=9 space=3
+  glyph A
+    .###.
+    #...#
+    #...#
+    #####
+    #...#
+    #...#
+    #...#
+  glyph U+003B advance=2   ; `;` starts comments, so write it by its code
+    .
+    #
+    .
+    .
+    #
+    #
+    .
+```
+
+- **Metrics.** Every glyph has `height` rows; their widths may differ. `baseline` is
+  how many rows are above the baseline (default `height`: no descent), and
+  `line_height` the distance between baselines (default `height + 1`).
+- **Advance.** A glyph's advance is its width plus `spacing` (default 1), unless it
+  says `advance=N`. A glyph may have no rows: a blank of width 0, such as a space.
+  Without a glyph for the space, the font gets one whose advance is `space`
+  (default half the height, rounded up).
+- **Characters** are written as themselves, or as `U+` and 4 to 6 hexadecimal digits.
+
+`Font::render` draws text, with `\n` for new lines, and `Font::to_ttf` writes the font
+as **TrueType**:
+
+- **Outlines.** Each glyph's outline is its pixels as squares, merged where they share
+  an edge, with corners only: outer contours clockwise, holes counter-clockwise, and
+  pixels that touch only at a corner in separate contours. `Font::outline` returns it.
+- **Metrics.** The em is the glyph height, at 128 font units a pixel (fewer for fonts
+  taller than 128 pixels or glyphs wider than 250), so the font is crisp at integer
+  multiples of its pixel size: a 7-pixel font drawn at 14 or 21 pixels.
+- **Tables.** The ten tables TrueType requires: `cmap` (formats 4 and, beyond the
+  Basic Multilingual Plane, 12), `glyf`, `loca`, `head`, `hhea`, `hmtx`, `maxp`,
+  `name`, `OS/2` (version 4) and `post`. Glyph 0, `.notdef`, is a hollow box. There
+  is no hinting and no kerning, and the file holds no time stamp, so the same font
+  gives the same bytes.
+- **Checked.** The tests read the file back table by table, and with
+  `SPRITEBOX_FONT_TESTS=1`, FreeType (`fc-scan`) reads it and macOS Core Text draws
+  every glyph exactly as its grid.
+
 ## Output
 
 **RGBA8.** `Sprite::render` returns an `Image`: RGBA8 pixels, sRGB-encoded and not
@@ -417,9 +471,9 @@ each frame's rectangle and ticks. `Atlas::to_json` writes the same as JSON; for
   added without one.
 
 **Export.** `Document::export` gives everything a game needs: the atlas, a texture
-for each tileset, and the tilemaps. `Export::files` names them `atlas.png`,
-`tileset-NAME.png` and `spritebox.json`, and `Export::to_json` adds `tilesets` and
-`tilemaps` to the atlas's JSON:
+for each tileset, the tilemaps, and a TrueType file for each font. `Export::files`
+names them `atlas.png`, `tileset-NAME.png`, `font-NAME.ttf` and `spritebox.json`,
+and `Export::to_json` adds `tilesets`, `tilemaps` and `fonts` to the atlas's JSON:
 
 ```json
   "tilesets": {
@@ -442,6 +496,9 @@ for each tileset, and the tilemaps. `Export::files` names them `atlas.png`,
       ],
       "solid": [1, 2, 3, "..."]
     }
+  },
+  "fonts": {
+    "hud": {"file": "font-hud.ttf", "height": 7, "baseline": 7, "line_height": 9, "units_per_pixel": 128}
   }
 ```
 
@@ -455,7 +512,8 @@ nearest sampling. A sprite's `Rect` is the `region` of `diamon.sprite2d`, and an
 animation's frames, a rectangle and ticks each, are a clip of
 `diamon.sprite_animation2d`. A tilemap is a `diamon.tilemap2d`: its tileset's texture
 and `tile_size`, its rows of indices with 0 as empty, and its `solid` indices for
-collision.
+collision. A font needs nothing new: `FontLibrary` takes the TrueType file, and text
+drawn at a multiple of the font's height stays crisp.
 
 **Preview sheets.** `Document::preview` draws every sprite; every animation's frames
 in a row with their ticks; every tileset's tiles with their indices; and the top-left
@@ -469,18 +527,22 @@ with names, sizes and ticks in a small built-in pixel font.
 ```text
 spritebox check <file> [--json]
 spritebox render <file> --out <dir> [--scale <n>] [--padding <n>] [--extrude] [--json]
+spritebox font <file> --out <font.ttf> [--font <name>] [--family <name>] [--json]
 ```
 
 - `check` validates a file and prints every diagnostic, as
   `file:line:column: error[code]: message` on standard error, or as JSON.
 - `render` validates a file, then writes `atlas.png`, `tileset-NAME.png` for each
-  tileset, the metadata `spritebox.json`, and `preview.png` to `<dir>`. Nothing is written when the file
+  tileset, `font-NAME.ttf` for each font, the metadata `spritebox.json`, and
+  `preview.png` to `<dir>`. Nothing is written when the file
   has errors. `--scale` sets the preview's scale, and `--padding` and `--extrude`
   the atlas's.
+- `font` validates a file, then writes one of its fonts as TrueType: the only one,
+  or the one `--font` names. `--family` sets the family name in the file.
 - `<file>` may be `-` for standard input.
 
-Exit statuses are stable: **0** success, **1** the file has errors, **2** bad usage,
-**3** an I/O error. With `--json`, standard output is one JSON object:
+Exit statuses are stable: **0** success, **1** the file has errors, **2** bad usage
+(including a `--font` that is missing or unknown), **3** an I/O error. With `--json`, standard output is one JSON object:
 
 ```json
 {"version":1,"file":"bad.spritebox","ok":false,"diagnostics":[
@@ -527,6 +589,7 @@ hand-written files and untrusted input; raise them for trusted input.
 | `max_frames` | 1024 frames in an animation |
 | `max_tiles` | 4096 tiles in a tileset, terrain variants included |
 | `max_map_side` | 1024 tiles |
+| `max_glyphs` | 4096 glyphs in a font |
 | `max_nesting` | 32 levels of palettes copied `from=` others, or of sprites derived from sprites |
 | `max_image_side` | 8192 pixels, for any image created or decoded |
 | `max_image_pixels` | 16 Mi pixels, for any image, and for all sprites together |
@@ -541,8 +604,10 @@ fn parse_trusted(text: &str) -> spritebox::Result<Document> {
 
 ## Limitations
 
-- No pixel fonts or procedural textures yet; see the capability table for what comes
-  next.
+- No procedural textures yet; see the capability table for what comes next.
+- Fonts are one weight and style, without kerning, ligatures or hinting; outlines
+  are exact squares, so they are crisp at integer multiples of the pixel size and
+  blur in between, like any pixel font.
 - Terrains connect only to themselves: there are no transitions between terrains,
   such as grass meeting sand, and no animated tiles.
 - An atlas is one texture; when the sprites do not fit within
@@ -567,6 +632,7 @@ cargo test --release
 cargo +1.85.0 test
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
 SPRITEBOX_FFMPEG_TESTS=1 cargo test --test png   # needs FFmpeg
+SPRITEBOX_FONT_TESTS=1 cargo test --test font    # needs fc-scan; on macOS, swift
 cargo publish --dry-run
 ```
 

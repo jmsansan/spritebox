@@ -1,7 +1,7 @@
 //! 2D pixel art as plain text, in safe Rust with zero dependencies.
 //!
-//! A spritebox file defines palettes, sprites, animations, tilesets and tilemaps as
-//! text that a person or an AI assistant can write, read and diff. The crate
+//! A spritebox file defines palettes, sprites, animations, tilesets, tilemaps and
+//! pixel fonts as text that a person or an AI assistant can write, read and diff. The crate
 //! validates it with exact diagnostics, renders it to RGBA8 images and PNG files, and
 //! draws preview sheets to review a whole file at a glance. The same text gives the same pixels on every
 //! platform.
@@ -129,6 +129,21 @@
 //! [`Tilemap`] hold the result: tile indices from 1, 0 for an empty cell, and the
 //! solid indices. The README documents the rules in full.
 //!
+//! ## Pixel fonts
+//!
+//! ```text
+//! font hud height=7 baseline=7 line_height=9
+//!   glyph A
+//!     .###.
+//!     #...#
+//!     ...
+//! ```
+//!
+//! Rows of `#` and `.`; characters as themselves or `U+003B`. [`Font::render`] draws
+//! text, and [`Font::to_ttf`] writes TrueType whose outlines are the pixels as
+//! squares, with the em at the glyph height, so it is crisp at integer multiples of
+//! its pixel size.
+//!
 //! # Errors
 //!
 //! Errors are [`Error`] values with a stable [`ErrorCode`] and, for text, the
@@ -141,8 +156,8 @@
 //! [`Sprite::render`] gives an [`Image`]: RGBA8 pixels, sRGB-encoded and not
 //! premultiplied, tightly packed, top row first. [`Document::atlas`] packs every
 //! sprite into one texture, with each one's [`Rect`] and the animations' frames, as
-//! structs and as JSON, and [`Document::export`] adds a texture for each tileset and
-//! the tilemaps. [`png`] encodes and decodes PNG files, and
+//! structs and as JSON, and [`Document::export`] adds a texture for each tileset, the
+//! tilemaps and a TrueType file for each font. [`png`] encodes and decodes PNG files, and
 //! [`Document::preview`] draws a preview sheet.
 #![forbid(unsafe_code)]
 
@@ -150,6 +165,7 @@ mod atlas;
 mod document;
 mod error;
 mod export;
+mod font;
 mod image;
 mod json;
 mod label;
@@ -159,11 +175,13 @@ mod preview;
 mod sprite;
 mod text;
 mod tiles;
+mod ttf;
 
 pub use atlas::{Atlas, AtlasAnimation, AtlasFrame, AtlasOptions, Rect, Region};
 pub use document::{Animation, Document, Frame, check};
 pub use error::{Error, ErrorCode, Position, Result};
-pub use export::{ATLAS_FILE, Export, ExportOptions, METADATA_FILE, TilesetExport};
+pub use export::{ATLAS_FILE, Export, ExportOptions, FontExport, METADATA_FILE, TilesetExport};
+pub use font::{Font, Glyph, TtfOptions};
 pub use image::{Color, Image};
 pub use limits::Limits;
 pub use preview::PreviewOptions;

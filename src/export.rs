@@ -3,7 +3,7 @@
 
 use crate::atlas::write_header;
 use crate::json::{Writer, list};
-use crate::{Atlas, AtlasOptions, Document, Image, Limits, Result, Scheme, Tilemap};
+use crate::{Atlas, AtlasOptions, Document, Image, Limits, Result, Scheme, Tilemap, TtfOptions};
 
 /// How a document is exported.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -30,6 +30,21 @@ pub struct TilesetExport {
     pub terrains: Vec<(String, Scheme, u32)>,
 }
 
+/// A font as a TrueType file.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub struct FontExport {
+    pub name: String,
+    /// The file's name: `font-NAME.ttf`.
+    pub file: String,
+    pub ttf: Vec<u8>,
+    pub height: u32,
+    pub baseline: u32,
+    pub line_height: u32,
+    /// TrueType units for each pixel; the em is `height * units_per_pixel`.
+    pub units_per_pixel: u32,
+}
+
 /// The files of a document: see [`Export::files`].
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
@@ -37,6 +52,7 @@ pub struct Export {
     pub atlas: Atlas,
     pub tilesets: Vec<TilesetExport>,
     pub tilemaps: Vec<Tilemap>,
+    pub fonts: Vec<FontExport>,
 }
 
 /// The name of the atlas texture in exported files.
@@ -92,16 +108,30 @@ impl Export {
             w.close('}');
         }
         w.close('}');
+        w.object(Some("fonts"));
+        for font in &self.fonts {
+            w.object(Some(&font.name));
+            w.string(Some("file"), &font.file);
+            w.raw(Some("height"), &font.height.to_string());
+            w.raw(Some("baseline"), &font.baseline.to_string());
+            w.raw(Some("line_height"), &font.line_height.to_string());
+            w.raw(Some("units_per_pixel"), &font.units_per_pixel.to_string());
+            w.close('}');
+        }
+        w.close('}');
         w.close('}');
         w.finish()
     }
 
     /// Every file, as `(name, bytes)`: `atlas.png`, then `tileset-NAME.png` for each
-    /// tileset, then `spritebox.json`.
+    /// tileset, `font-NAME.ttf` for each font, then `spritebox.json`.
     pub fn files(&self) -> Vec<(String, Vec<u8>)> {
         let mut files = vec![(ATLAS_FILE.to_owned(), crate::png::encode(&self.atlas.image))];
         for t in &self.tilesets {
             files.push((t.file.clone(), crate::png::encode(&t.image)));
+        }
+        for f in &self.fonts {
+            files.push((f.file.clone(), f.ttf.clone()));
         }
         files.push((METADATA_FILE.to_owned(), self.to_json().into_bytes()));
         files
@@ -132,9 +162,25 @@ pub(crate) fn build(
                 .collect(),
         })
         .collect();
+    let fonts = document
+        .fonts
+        .iter()
+        .map(|f| {
+            Ok(FontExport {
+                name: f.name.clone(),
+                file: format!("font-{}.ttf", f.name),
+                ttf: f.to_ttf(&TtfOptions::default())?,
+                height: f.height,
+                baseline: f.baseline,
+                line_height: f.line_height,
+                units_per_pixel: f.units_per_pixel(),
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
     Ok(Export {
         atlas,
         tilesets,
         tilemaps: document.tilemaps.clone(),
+        fonts,
     })
 }

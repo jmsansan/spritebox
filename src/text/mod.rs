@@ -2,6 +2,7 @@
 
 mod animation;
 mod chain;
+mod font;
 mod lex;
 mod sprite;
 mod tiles;
@@ -15,7 +16,7 @@ use sprite::SpriteDef;
 use tiles::{TilemapDef, TilesetDef};
 
 /// The directives that start a definition.
-const DIRECTIVES: &str = "`palette`, `sprite`, `animation`, `tileset` or `tilemap`";
+const DIRECTIVES: &str = "`palette`, `sprite`, `animation`, `tileset`, `tilemap` or `font`";
 
 /// Parses `text`. Returns the document, complete when there are no errors, and the
 /// errors ordered by position.
@@ -42,6 +43,8 @@ pub(crate) fn parse(text: &str, limits: &Limits) -> (Document, Vec<Error>) {
         animations: Vec::new(),
         tilesets: Vec::new(),
         tilemaps: Vec::new(),
+        fonts: Vec::new(),
+        failed_fonts: Vec::new(),
     };
     for (count, node) in nodes.iter().enumerate() {
         if count == limits.max_definitions {
@@ -81,6 +84,9 @@ struct Parser<'a, 'l> {
     animations: Vec<AnimationDef<'a>>,
     tilesets: Vec<TilesetDef<'a>>,
     tilemaps: Vec<TilemapDef<'a>>,
+    fonts: Vec<(Token<'a>, crate::Font)>,
+    /// Fonts with errors, which were reported, kept so their names are known.
+    failed_fonts: Vec<Token<'a>>,
 }
 
 /// The words of a definition's first line after its keyword and name: positional
@@ -222,6 +228,7 @@ impl<'a> Parser<'a, '_> {
             "animation" => self.animation(node),
             "tileset" => self.tileset(node),
             "tilemap" => self.tilemap(node),
+            "font" => self.font(node),
             other => Err(node.line.first().error(
                 ErrorCode::Syntax,
                 format!("Unknown directive `{other}`; expected {DIRECTIVES}"),
@@ -279,6 +286,7 @@ impl<'a> Parser<'a, '_> {
         let frame_sprites = self.spend(frame_sprites, &mut budget);
         let tilesets = self.resolve_tilesets(&palettes, &sprites);
         let tilemaps = self.resolve_tilemaps(&tilesets);
+        let fonts = self.resolve_fonts();
         Document {
             palettes,
             sprites,
@@ -286,6 +294,7 @@ impl<'a> Parser<'a, '_> {
             animations,
             tilesets,
             tilemaps,
+            fonts,
         }
     }
 

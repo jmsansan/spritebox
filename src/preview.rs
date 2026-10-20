@@ -185,6 +185,39 @@ pub(crate) fn sheet(
             groups,
         });
     }
+    if !document.fonts.is_empty() {
+        let mut groups = Vec::new();
+        for font in &document.fonts {
+            // Every glyph, 24 to a line.
+            let chars: Vec<char> = font
+                .glyphs
+                .iter()
+                .map(|g| g.ch)
+                .filter(|&c| c != ' ')
+                .collect();
+            let lines: Vec<String> = chars.chunks(24).map(|c| c.iter().collect()).collect();
+            let text = if lines.is_empty() {
+                " ".to_owned()
+            } else {
+                lines.join("\n")
+            };
+            let image = font.render_with(&text, Color::WHITE, limits)?;
+            groups.push(Group {
+                label: font.name.clone(),
+                items: vec![Item::new(
+                    image,
+                    format!(
+                        "height {} baseline {} line {}",
+                        font.height, font.baseline, font.line_height
+                    ),
+                )],
+            });
+        }
+        sections.push(Section {
+            title: "Fonts".into(),
+            groups,
+        });
+    }
     if sections.is_empty() {
         sections.push(Section {
             title: "Nothing to show".into(),

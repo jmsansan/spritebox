@@ -24,10 +24,14 @@
   of keys, autotiling with `outside=same|empty`, and solid tiles.
 - `Document::export`: the atlas, a texture for each tileset, the tilemaps, and their
   metadata in one JSON file.
+- Pixel fonts: glyph grids with an advance, a baseline and a line height; text drawn
+  with them; and TrueType export whose outlines are the pixels as squares, merged
+  where they share an edge, with the em at the glyph height.
 - Atlases: sprites and frame sprites packed into one texture with padding and
   optional extrusion, identical sprites shared, with each sprite's rectangle and
   each animation's frames as Rust structs and as JSON written by the crate.
 - Preview sheets of a document's sprites and animations, labelled in a built-in
   pixel font.
-- The `spritebox` command: `check`, and `render`, which writes the atlas, the
-  tileset textures, their metadata and the preview sheet; JSON diagnostics and stable exit statuses.
+- The `spritebox` command: `check`; `render`, which writes the atlas, the tileset
+  textures, the fonts, their metadata and the preview sheet; and `font`, which
+  writes one font as TrueType; JSON diagnostics and stable exit statuses.
