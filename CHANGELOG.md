@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.1.0
+
+First release: the art of a 2D game as plain text, from palettes to TrueType fonts,
+with the metadata that Diamon's sprites, animations, tilemaps and panels read.
 
 ### Added
 
