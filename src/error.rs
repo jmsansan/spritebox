@@ -57,15 +57,27 @@ impl fmt::Display for ErrorCode {
 }
 
 /// A place in text: a 1-based line, and a 1-based column counted in characters.
+///
+/// Positions in an imported file say which file through [`Error::file`].
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct Position {
+    /// Which file of a parse: 0 for the text parsed, then imported files in the
+    /// order loaded. First, so that errors sort by file, then line, then column.
+    pub(crate) file: u32,
     pub line: usize,
     pub column: usize,
 }
 
 impl Position {
     pub fn new(line: usize, column: usize) -> Self {
-        Self { line, column }
+        Self {
+            file: 0,
+            line,
+            column,
+        }
+    }
+    pub(crate) fn in_file(file: u32, line: usize, column: usize) -> Self {
+        Self { file, line, column }
     }
 }
 
@@ -78,6 +90,9 @@ pub struct Error {
     /// Where in the text the error is. Every parse and validation error has one;
     /// errors in binary input and I/O errors do not.
     pub position: Option<Position>,
+    /// The imported file that `position` is in, by the name its `import` resolves
+    /// to; `None` for the text parsed itself.
+    pub file: Option<String>,
 }
 
 impl Error {
@@ -86,6 +101,7 @@ impl Error {
             code,
             message: message.into(),
             position: None,
+            file: None,
         }
     }
     /// An error at `position` in text.
@@ -94,6 +110,7 @@ impl Error {
             code,
             message: message.into(),
             position: Some(position),
+            file: None,
         }
     }
     pub(crate) fn invalid(message: impl Into<String>) -> Self {
@@ -109,6 +126,9 @@ impl Error {
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(file) = &self.file {
+            write!(f, "{file}, ")?;
+        }
         match self.position {
             Some(p) => write!(f, "line {}, column {}: {}", p.line, p.column, self.message),
             None => f.write_str(&self.message),

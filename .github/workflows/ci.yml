@@ -37,12 +37,22 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.85.0
       - run: cargo test --locked --offline
 
+  wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - run: cargo check --locked --offline --lib --target wasm32-unknown-unknown
+
   interoperability:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
-      - run: cargo test --locked --offline --test png
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg fontconfig
+      - run: cargo test --locked --offline --test png --test font
         env:
           SPRITEBOX_FFMPEG_TESTS: '1'
+          SPRITEBOX_FONT_TESTS: '1'

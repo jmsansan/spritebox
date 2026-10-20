@@ -5,7 +5,10 @@ use std::io::Read as _;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use spritebox::{Document, Error, ErrorCode, Limits, Position, PreviewOptions, png};
+use spritebox::{
+    AtlasOptions, Document, Error, ErrorCode, ExportOptions, Limits, Position, PreviewOptions,
+    TtfOptions, png,
+};
 
 const USAGE: &str = "\
 spritebox: 2D pixel art as plain text
@@ -13,8 +16,13 @@ spritebox: 2D pixel art as plain text
 Usage:
   spritebox check <file> [--json]
       Validate a file and print its diagnostics.
-  spritebox render <file> --out <dir> [--scale <n>] [--json]
-      Validate a file, then write preview.png and sprites/<name>.png to <dir>.
+  spritebox render <file> --out <dir> [--scale <n>] [--padding <n>] [--no-extrude]
+                   [--max-side <n>] [--json]
+      Validate a file, then write atlas.png, tileset-<name>.png for each
+      tileset, font-<name>.ttf for each font, spritebox.json (the metadata)
+      and preview.png to <dir>.
+  spritebox font <file> --out <font.ttf> [--font <name>] [--family <name>] [--json]
+      Validate a file, then write one of its fonts as TrueType.
 
 <file> may be `-` for standard input.
 
@@ -22,6 +30,11 @@ Options:
   --json        Print diagnostics as JSON on standard output.
   --out <dir>   Directory for output files; created if missing.
   --scale <n>   Pixels per sprite pixel in the preview, 1..=64 (default 4).
+  --padding <n> Pixels around each sprite and tile in textures, 0..=64 (default 1).
+  --no-extrude  Leave the padding transparent instead of copying edge pixels.
+  --max-side <n> The largest side of a texture, 1..=8192 (default 2048).
+  --font <name> The font to write, when the file has several.
+  --family <n>  The family name in the TrueType file (default: the font's name).
   -h, --help    Print this help.
   -V, --version Print the version.
 
@@ -37,6 +50,9 @@ struct Options {
     file: String,
     out: Option<PathBuf>,
     scale: u32,
+    atlas: AtlasOptions,
+    font: Option<String>,
+    family: Option<String>,
     json: bool,
 }
 
@@ -64,12 +80,15 @@ fn main() -> ExitCode {
 fn parse_args(args: &[String]) -> Result<Options, String> {
     let mut iter = args.iter();
     let command = iter.next().ok_or("missing command")?.clone();
-    if command != "check" && command != "render" {
+    if !["check", "render", "font"].contains(&command.as_str()) {
         return Err(format!("unknown command `{command}`"));
     }
     let mut file = None;
     let mut out = None;
     let mut scale = PreviewOptions::default().scale;
+    let mut atlas = AtlasOptions::default();
+    let mut font = None;
+    let mut family = None;
     let mut json = false;
     while let Some(arg) = iter.next() {
         match arg.as_str() {
@@ -83,6 +102,25 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
                     .filter(|s| (1..=64).contains(s))
                     .ok_or(format!("--scale must be 1..=64, not `{value}`"))?;
             }
+            "--padding" => {
+                let value = iter.next().ok_or("--padding needs a number")?;
+                atlas.padding = value
+                    .parse()
+                    .ok()
+                    .filter(|p| *p <= 64)
+                    .ok_or(format!("--padding must be 0..=64, not `{value}`"))?;
+            }
+            "--no-extrude" => atlas.extrude = false,
+            "--max-side" => {
+                let value = iter.next().ok_or("--max-side needs a number")?;
+                atlas.max_side = value
+                    .parse()
+                    .ok()
+                    .filter(|p| (1..=8192).contains(p))
+                    .ok_or(format!("--max-side must be 1..=8192, not `{value}`"))?;
+            }
+            "--font" => font = Some(iter.next().ok_or("--font needs a name")?.clone()),
+            "--family" => family = Some(iter.next().ok_or("--family needs a name")?.clone()),
             _ if arg.starts_with("--") => return Err(format!("unknown option `{arg}`")),
             _ if file.is_none() => file = Some(arg.clone()),
             _ => return Err(format!("unexpected argument `{arg}`")),
@@ -92,14 +130,26 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
     if command == "render" && out.is_none() {
         return Err("render needs --out <dir>".into());
     }
+    if command == "font" && out.is_none() {
+        return Err("font needs --out <font.ttf>".into());
+    }
     if command == "check" && out.is_some() {
-        return Err("check writes no files; --out is for render".into());
+        return Err("check writes no files; --out is for render and font".into());
+    }
+    if command != "render" && atlas != AtlasOptions::default() {
+        return Err("--padding, --no-extrude and --max-side are for render".into());
+    }
+    if command != "font" && (font.is_some() || family.is_some()) {
+        return Err("--font and --family are for the font command".into());
     }
     Ok(Options {
         command,
         file,
         out,
         scale,
+        atlas,
+        font,
+        family,
         json,
     })
 }
@@ -111,29 +161,84 @@ fn run(options: &Options) -> ExitCode {
         Err(error) => return report(options, &[error], &[], EXIT_IO),
     };
     let limits = Limits::default();
-    let errors = spritebox::check(&text, &limits);
+    // Imports are read from disk, relative to the file's directory.
+    let base = base_dir(&options.file);
+    let mut loader = |name: &str| -> Result<String, Error> {
+        let path = base.join(name);
+        std::fs::read_to_string(&path)
+            .map_err(|e| Error::new(ErrorCode::Io, format!("{}: {e}", path.display())))
+    };
+    let errors = spritebox::check_with_loader(&text, &limits, &mut loader);
     if !errors.is_empty() {
         return report(options, &errors, &[], EXIT_INVALID);
     }
     if options.command == "check" {
         return report(options, &[], &[], 0);
     }
-    let document = match Document::parse_with(&text, &limits) {
+    let document = match Document::parse_with_loader(&text, &limits, &mut loader) {
         Ok(document) => document,
         Err(error) => return report(options, &[error], &[], EXIT_INVALID),
     };
     let out = options.out.as_deref().unwrap_or(Path::new("."));
-    match render(&document, out, options.scale, &limits) {
+    let result = if options.command == "font" {
+        write_font(&document, out, options)
+    } else {
+        render(&document, out, options, &limits)
+    };
+    match result {
         Ok(written) => report(options, &[], &written, 0),
         Err(error) => {
-            let status = if error.code == ErrorCode::Io {
-                EXIT_IO
-            } else {
-                EXIT_INVALID
+            let status = match error.code {
+                ErrorCode::Io => EXIT_IO,
+                ErrorCode::InvalidArgument if options.command == "font" => EXIT_USAGE,
+                _ => EXIT_INVALID,
             };
             report(options, &[error], &[], status)
         }
     }
+}
+
+/// Writes the chosen font to `out`. A missing or ambiguous font is an
+/// `InvalidArgument` error, reported with the usage exit status.
+fn write_font(document: &Document, out: &Path, options: &Options) -> Result<Vec<PathBuf>, Error> {
+    let fonts = document.fonts();
+    let font = match &options.font {
+        Some(name) => document.font(name).ok_or_else(|| {
+            Error::new(
+                ErrorCode::InvalidArgument,
+                format!("The file has no font `{name}`"),
+            )
+        })?,
+        None if fonts.len() == 1 => &fonts[0],
+        None => {
+            return Err(Error::new(
+                ErrorCode::InvalidArgument,
+                format!(
+                    "The file defines {} fonts; choose one with --font <name>",
+                    fonts.len()
+                ),
+            ));
+        }
+    };
+    let ttf = font.to_ttf(&TtfOptions {
+        family: options.family.clone(),
+        ..TtfOptions::default()
+    })?;
+    if let Some(parent) = out.parent().filter(|p| !p.as_os_str().is_empty()) {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            Error::new(
+                ErrorCode::Io,
+                format!("Cannot write {}: {e}", parent.display()),
+            )
+        })?;
+    }
+    std::fs::write(out, ttf).map_err(|e| {
+        Error::new(
+            ErrorCode::Io,
+            format!("Cannot write {}: {e}", out.display()),
+        )
+    })?;
+    Ok(vec![out.to_path_buf()])
 }
 
 /// Reads the input; the inner error is text that is not UTF-8.
@@ -168,34 +273,59 @@ fn read_input(file: &str) -> Result<Result<String, Error>, Error> {
 fn render(
     document: &Document,
     out: &Path,
-    scale: u32,
+    options: &Options,
     limits: &Limits,
 ) -> Result<Vec<PathBuf>, Error> {
+    // Everything is made before anything is written.
+    let export = document.export_with(
+        &ExportOptions {
+            atlas: options.atlas.clone(),
+        },
+        limits,
+    )?;
+    let preview = document.preview_with(
+        &PreviewOptions {
+            scale: options.scale,
+            ..PreviewOptions::default()
+        },
+        limits,
+    )?;
+    let mut files = export.files();
+    files.push(("preview.png".to_owned(), png::encode(&preview)));
     let io = |path: &Path, e: std::io::Error| {
         Error::new(
             ErrorCode::Io,
             format!("Cannot write {}: {e}", path.display()),
         )
     };
-    let sprites = out.join("sprites");
-    std::fs::create_dir_all(&sprites).map_err(|e| io(&sprites, e))?;
+    std::fs::create_dir_all(out).map_err(|e| io(out, e))?;
     let mut written = Vec::new();
-    let preview = document.preview_with(
-        &PreviewOptions {
-            scale,
-            ..PreviewOptions::default()
-        },
-        limits,
-    )?;
-    let path = out.join("preview.png");
-    std::fs::write(&path, png::encode(&preview)).map_err(|e| io(&path, e))?;
-    written.push(path);
-    for sprite in document.sprites() {
-        let path = sprites.join(format!("{}.png", sprite.name()));
-        std::fs::write(&path, sprite.render().to_png()).map_err(|e| io(&path, e))?;
+    for (name, bytes) in files {
+        let path = out.join(name);
+        std::fs::write(&path, bytes).map_err(|e| io(&path, e))?;
         written.push(path);
     }
     Ok(written)
+}
+
+/// The directory that imports resolve from: the file's, or the current one for
+/// standard input.
+fn base_dir(file: &str) -> PathBuf {
+    if file == "-" {
+        return PathBuf::new();
+    }
+    Path::new(file)
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_default()
+}
+
+/// The file an error is in, as the user would open it.
+fn error_file(options: &Options, e: &Error, main: &str) -> String {
+    match &e.file {
+        Some(imported) => base_dir(&options.file).join(imported).display().to_string(),
+        None => main.to_owned(),
+    }
 }
 
 /// Prints the outcome and returns `status`.
@@ -218,6 +348,9 @@ fn report(options: &Options, errors: &[Error], written: &[PathBuf], status: u8) 
                 json.push(',');
             }
             let _ = write!(json, "{{\"code\":{}", quote(e.code.as_str()));
+            if e.file.is_some() {
+                let _ = write!(json, ",\"file\":{}", quote(&error_file(options, e, file)));
+            }
             if let Some(p) = e.position {
                 let _ = write!(json, ",\"line\":{},\"column\":{}", p.line, p.column);
             }
@@ -234,12 +367,13 @@ fn report(options: &Options, errors: &[Error], written: &[PathBuf], status: u8) 
         println!("{json}");
     } else {
         for e in errors {
+            let at = error_file(options, e, file);
             match e.position {
                 Some(p) => eprintln!(
-                    "{file}:{}:{}: error[{}]: {}",
+                    "{at}:{}:{}: error[{}]: {}",
                     p.line, p.column, e.code, e.message
                 ),
-                None => eprintln!("{file}: error[{}]: {}", e.code, e.message),
+                None => eprintln!("{at}: error[{}]: {}", e.code, e.message),
             }
         }
         for path in written {

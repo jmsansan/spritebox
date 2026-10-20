@@ -23,8 +23,18 @@ pub struct Limits {
     pub max_palette_colors: usize,
     /// Width or height of one sprite in pixels. Default 1024.
     pub max_sprite_side: u32,
+    /// Layers in one sprite, layers of sprites used as layers included. Default 16.
+    pub max_layers: usize,
+    /// Frames in one animation. Default 1024.
+    pub max_frames: usize,
+    /// Tiles in one tileset, terrain variants included. Default 4096.
+    pub max_tiles: usize,
+    /// Width or height of one tilemap in tiles. Default 1024.
+    pub max_map_side: u32,
+    /// Glyphs in one font. Default 4096.
+    pub max_glyphs: usize,
     /// Depth of definitions built on other definitions: palettes copied `from=`
-    /// another. Default 32.
+    /// another, and sprites derived from sprites. Default 32.
     pub max_nesting: usize,
     /// Width or height of any image the crate creates or decodes, previews and
     /// atlases included. Default 8192.
@@ -41,6 +51,11 @@ impl Default for Limits {
             max_definitions: 4096,
             max_palette_colors: 256,
             max_sprite_side: 1024,
+            max_layers: 16,
+            max_frames: 1024,
+            max_tiles: 4096,
+            max_map_side: 1024,
+            max_glyphs: 4096,
             max_nesting: 32,
             max_image_side: 8192,
             max_image_pixels: 16 * 1024 * 1024,

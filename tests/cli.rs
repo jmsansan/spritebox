@@ -115,23 +115,161 @@ fn render_writes_files() {
         dir.to_str().unwrap(),
         "--scale",
         "2",
+        "--padding",
+        "2",
+        "--no-extrude",
         "--json",
     ]);
     assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
     let json = stdout(&out);
-    for name in [
-        "preview.png",
-        "sprites/coin.png",
-        "sprites/coin_dusk.png",
-        "sprites/gem.png",
-    ] {
-        let path = dir.join(name);
-        assert!(json.contains(&path.display().to_string()), "{json}");
-        let image = spritebox::png::read_file(&path).unwrap();
-        assert!(image.width() > 0);
+    for name in ["atlas.png", "spritebox.json", "preview.png"] {
+        assert!(
+            json.contains(&dir.join(name).display().to_string()),
+            "{json}"
+        );
     }
-    let coin = spritebox::png::read_file(dir.join("sprites/coin.png")).unwrap();
-    assert_eq!((coin.width(), coin.height()), (8, 8));
+    let doc = spritebox::Document::parse(&std::fs::read_to_string(COIN).unwrap()).unwrap();
+    let options = spritebox::ExportOptions {
+        atlas: spritebox::AtlasOptions {
+            padding: 2,
+            extrude: false,
+            ..Default::default()
+        },
+    };
+    let export = doc.export(&options).unwrap();
+    assert_eq!(
+        spritebox::png::read_file(dir.join("atlas.png")).unwrap(),
+        export.atlas.image
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.join("spritebox.json")).unwrap(),
+        export.to_json()
+    );
+    let preview = doc
+        .preview(&spritebox::PreviewOptions {
+            scale: 2,
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(
+        spritebox::png::read_file(dir.join("preview.png")).unwrap(),
+        preview
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn render_writes_tilesets() {
+    let dir = temp_dir("render-tiles");
+    let tiles = concat!(env!("CARGO_MANIFEST_DIR"), "/examples/tiles.spritebox");
+    let out = spritebox(&["render", tiles, "--out", dir.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let doc = spritebox::Document::parse(&std::fs::read_to_string(tiles).unwrap()).unwrap();
+    let export = doc.export(&spritebox::ExportOptions::default()).unwrap();
+    assert_eq!(
+        spritebox::png::read_file(dir.join("tileset-ground.png")).unwrap(),
+        export.tilesets[0].image
+    );
+    let text = stdout(&out);
+    let written: Vec<&str> = text
+        .lines()
+        .map(|l| l.rsplit('/').next().unwrap())
+        .collect();
+    assert_eq!(
+        written,
+        [
+            "atlas.png",
+            "tileset-ground.png",
+            "spritebox.json",
+            "preview.png"
+        ]
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn font_writes_truetype() {
+    let dir = temp_dir("font");
+    let font = concat!(env!("CARGO_MANIFEST_DIR"), "/examples/font.spritebox");
+    let path = dir.join("nested/hud.ttf");
+    let out = spritebox(&[
+        "font",
+        font,
+        "--out",
+        path.to_str().unwrap(),
+        "--family",
+        "HUD Pixel",
+        "--json",
+    ]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let doc = spritebox::Document::parse(&std::fs::read_to_string(font).unwrap()).unwrap();
+    let expected = doc
+        .font("hud")
+        .unwrap()
+        .to_ttf(&spritebox::TtfOptions {
+            family: Some("HUD Pixel".into()),
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), expected);
+    assert!(stdout(&out).contains("hud.ttf"));
+
+    // Several fonts need --font; an unknown font is bad usage too.
+    let two = write(&dir, "two.spritebox", "font a height=1\nfont b height=1\n");
+    let ttf = dir.join("x.ttf");
+    let out = spritebox(&["font", &two, "--out", ttf.to_str().unwrap(), "--json"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(
+        stdout(&out).contains("choose one with --font"),
+        "{}",
+        stdout(&out)
+    );
+    let out = spritebox(&["font", &two, "--out", ttf.to_str().unwrap(), "--font", "c"]);
+    assert_eq!(out.status.code(), Some(2));
+    let out = spritebox(&["font", &two, "--out", ttf.to_str().unwrap(), "--font", "b"]);
+    assert_eq!(out.status.code(), Some(0));
+    assert!(ttf.exists());
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn imports_are_read_from_disk_relative_to_the_file() {
+    let dir = temp_dir("imports");
+    std::fs::create_dir_all(dir.join("art/shared")).unwrap();
+    write(
+        &dir,
+        "art/shared/palettes.spritebox",
+        "palette p\n  k #000000\n  x #00\n",
+    );
+    let main = write(
+        &dir,
+        "art/main.spritebox",
+        "import shared/palettes.spritebox\nsprite s 1x1\n  k\n",
+    );
+    let out = spritebox(&["check", &main]);
+    assert_eq!(out.status.code(), Some(1));
+    let expected = dir.join("art/shared/palettes.spritebox");
+    let text = stderr(&out);
+    assert!(
+        text.contains(&format!(
+            "{}:3:5: error[invalid_argument]",
+            expected.display()
+        )),
+        "{text}"
+    );
+    let out = spritebox(&["check", &main, "--json"]);
+    assert!(
+        stdout(&out).contains(&format!("\"file\":{:?}", expected.display().to_string())),
+        "{}",
+        stdout(&out)
+    );
+    write(
+        &dir,
+        "art/shared/palettes.spritebox",
+        "palette p\n  k #000000\n",
+    );
+    let out = spritebox(&["render", &main, "--out", dir.join("out").to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
     std::fs::remove_dir_all(dir).unwrap();
 }
 
@@ -158,6 +296,11 @@ fn usage_and_io_errors() {
         &["render", COIN, "--out"],
         &["render", COIN, "--out", "x", "--scale", "0"],
         &["check", COIN, "--out", "x"],
+        &["check", COIN, "--no-extrude"],
+        &["render", COIN, "--out", "x", "--max-side", "0"],
+        &["font", COIN],
+        &["render", COIN, "--out", "x", "--font", "hud"],
+        &["render", COIN, "--out", "x", "--padding", "65"],
     ] {
         let out = spritebox(args);
         assert_eq!(out.status.code(), Some(2), "{args:?}");

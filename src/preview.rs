@@ -32,6 +32,7 @@ const CAPTION: Color = Color::rgb(0x9a, 0x9e, 0xaa);
 const FRAME: Color = Color::rgb(0x55, 0x58, 0x64);
 const CHECKER: [Color; 2] = [Color::rgb(0x6b, 0x6e, 0x78), Color::rgb(0x5c, 0x5f, 0x69)];
 const GRID: Color = Color::rgba(0, 0, 0, 56);
+const CELL_GRID: Color = Color::rgba(255, 255, 255, 48);
 
 const TEXT_SCALE: u32 = 2;
 const TEXT_HEIGHT: u32 = label::HEIGHT * TEXT_SCALE;
@@ -45,7 +46,26 @@ const LABEL_GAP: u32 = 4;
 pub(crate) struct Item {
     pub image: Image,
     pub caption: Option<String>,
+    /// A scale for this item instead of the sheet's.
+    pub scale: Option<u32>,
+    /// Grid lines every `(width, height)` pixels, such as tiles, instead of every
+    /// pixel.
+    pub cell: Option<(u32, u32)>,
 }
+
+impl Item {
+    fn new(image: Image, caption: String) -> Self {
+        Self {
+            image,
+            caption: Some(caption),
+            scale: None,
+            cell: None,
+        }
+    }
+}
+
+/// Tiles of a tilemap shown at most, from its top-left corner.
+const MAP_SAMPLE: (u32, u32) = (64, 36);
 
 /// Items side by side under a label: a sprite, or an animation's frames.
 pub(crate) struct Group {
@@ -76,12 +96,131 @@ pub(crate) fn sheet(
                 .iter()
                 .map(|s| Group {
                     label: s.name.clone(),
-                    items: vec![Item {
-                        image: s.render(),
-                        caption: Some(format!("{}x{}", s.width, s.height)),
-                    }],
+                    items: vec![Item::new(s.render(), format!("{}x{}", s.width, s.height))],
                 })
                 .collect(),
+        });
+    }
+    if !document.animations.is_empty() {
+        sections.push(Section {
+            title: "Animations".into(),
+            groups: document
+                .animations
+                .iter()
+                .map(|a| Group {
+                    label: format!(
+                        "{} {} {}t",
+                        a.name,
+                        if a.looping { "loop" } else { "once" },
+                        a.total_ticks()
+                    ),
+                    items: a
+                        .frames
+                        .iter()
+                        .map(|f| {
+                            // As an engine draws the frame: flipped as it says.
+                            let image = document
+                                .sprite(&f.sprite)
+                                .map(|s| {
+                                    let s = if f.flip_x { s.flip_x() } else { s.clone() };
+                                    let s = if f.flip_y { s.flip_y() } else { s };
+                                    s.render()
+                                })
+                                .unwrap_or_else(|| Image::blank(1, 1));
+                            Item::new(image, format!("{}t", f.ticks))
+                        })
+                        .collect(),
+                })
+                .collect(),
+        });
+    }
+    if !document.tilesets.is_empty() {
+        sections.push(Section {
+            title: "Tilesets".into(),
+            groups: document
+                .tilesets
+                .iter()
+                .map(|t| Group {
+                    label: format!("{} {}x{}", t.name, t.tile_width, t.tile_height),
+                    items: t
+                        .tiles
+                        .iter()
+                        .enumerate()
+                        .map(|(i, tile)| Item::new(tile.render(), (i + 1).to_string()))
+                        .collect(),
+                })
+                .collect(),
+        });
+    }
+    if !document.tilemaps.is_empty() {
+        let mut groups = Vec::new();
+        for map in &document.tilemaps {
+            let Some(tileset) = document.tileset(&map.tileset) else {
+                continue;
+            };
+            let (columns, rows) = (MAP_SAMPLE.0.min(map.width), MAP_SAMPLE.1.min(map.height));
+            let image = map.render_part(tileset, columns, rows, limits)?;
+            let solid = map.render_solid(tileset, columns, rows, limits)?;
+            let fits = image.width() * options.scale.div_ceil(2) + 2 <= options.max_width;
+            let scale = if fits { options.scale.div_ceil(2) } else { 1 };
+            let sample = if (columns, rows) == (map.width, map.height) {
+                String::new()
+            } else {
+                format!(", first {columns}x{rows}")
+            };
+            let cell = Some((tileset.tile_width, tileset.tile_height));
+            groups.push(Group {
+                label: format!("{} {}x{} tiles{sample}", map.name, map.width, map.height),
+                items: vec![
+                    Item {
+                        scale: Some(scale),
+                        cell,
+                        ..Item::new(image, format!("tileset {}", tileset.name))
+                    },
+                    Item {
+                        scale: Some(scale),
+                        cell,
+                        ..Item::new(solid, "solid".into())
+                    },
+                ],
+            });
+        }
+        sections.push(Section {
+            title: "Tilemaps".into(),
+            groups,
+        });
+    }
+    if !document.fonts.is_empty() {
+        let mut groups = Vec::new();
+        for font in &document.fonts {
+            // Every glyph, 24 to a line.
+            let chars: Vec<char> = font
+                .glyphs
+                .iter()
+                .map(|g| g.ch)
+                .filter(|&c| c != ' ')
+                .collect();
+            let lines: Vec<String> = chars.chunks(24).map(|c| c.iter().collect()).collect();
+            let text = if lines.is_empty() {
+                " ".to_owned()
+            } else {
+                lines.join("\n")
+            };
+            let image = font.render_with(&text, Color::WHITE, limits)?;
+            groups.push(Group {
+                label: font.name.clone(),
+                items: vec![Item::new(
+                    image,
+                    format!(
+                        "height {} baseline {} line {}",
+                        font.height, font.baseline, font.line_height
+                    ),
+                )],
+            });
+        }
+        sections.push(Section {
+            title: "Fonts".into(),
+            groups,
         });
     }
     if sections.is_empty() {
@@ -98,7 +237,12 @@ struct Placed {
     y: u32,
 }
 
-fn item_size(item: &Item, scale: u32) -> (u32, u32) {
+fn item_scale(item: &Item, options: &PreviewOptions) -> u32 {
+    item.scale.unwrap_or(options.scale)
+}
+
+fn item_size(item: &Item, options: &PreviewOptions) -> (u32, u32) {
+    let scale = item_scale(item, options);
     let w = item.image.width() * scale + 2;
     let h = item.image.height() * scale + 2;
     match &item.caption {
@@ -110,22 +254,33 @@ fn item_size(item: &Item, scale: u32) -> (u32, u32) {
     }
 }
 
-fn group_size(group: &Group, scale: u32) -> (u32, u32) {
-    let mut width = 0;
-    let mut height = 0;
-    for (i, item) in group.items.iter().enumerate() {
-        let (w, h) = item_size(item, scale);
-        width += w + if i > 0 { ITEM_GAP } else { 0 };
-        height = height.max(h);
+/// Places a group's items in rows no wider than `max_width` (but at least one item a
+/// row). Returns each item's offset under the label and the group's size.
+fn group_layout(
+    group: &Group,
+    options: &PreviewOptions,
+    max_width: u32,
+) -> (Vec<(u32, u32)>, u32, u32) {
+    let mut offsets = Vec::with_capacity(group.items.len());
+    let (mut x, mut y, mut row_height, mut width) = (0u32, 0u32, 0u32, 0u32);
+    for item in &group.items {
+        let (w, h) = item_size(item, options);
+        if x > 0 && x + w > max_width {
+            x = 0;
+            y += row_height + ITEM_GAP;
+            row_height = 0;
+        }
+        offsets.push((x, y));
+        x += w + ITEM_GAP;
+        width = width.max(x - ITEM_GAP);
+        row_height = row_height.max(h);
     }
-    (
-        width.max(label::width(&group.label, TEXT_SCALE)),
-        TEXT_HEIGHT + LABEL_GAP + height,
-    )
+    let width = width.max(label::width(&group.label, TEXT_SCALE));
+    (offsets, width, TEXT_HEIGHT + LABEL_GAP + y + row_height)
 }
 
 fn draw_sections(sections: &[Section], options: &PreviewOptions, limits: &Limits) -> Result<Image> {
-    let scale = options.scale;
+    let inner = options.max_width.saturating_sub(2 * MARGIN).max(1);
     // Lay out first, in u64 so that huge documents fail the size check, not overflow.
     let mut placements: Vec<(u64, Vec<Placed>)> = Vec::new();
     let mut y = MARGIN as u64;
@@ -137,7 +292,7 @@ fn draw_sections(sections: &[Section], options: &PreviewOptions, limits: &Limits
         let mut row_height = 0u64;
         let mut placed = Vec::new();
         for group in &section.groups {
-            let (w, h) = group_size(group, scale);
+            let (_, w, h) = group_layout(group, options, inner);
             let (w, h) = (w as u64, h as u64);
             if x > MARGIN as u64
                 && x + w > options.max_width as u64 - MARGIN.min(options.max_width) as u64
@@ -180,13 +335,13 @@ fn draw_sections(sections: &[Section], options: &PreviewOptions, limits: &Limits
             TITLE,
         );
         for (group, at) in section.groups.iter().zip(placed) {
-            draw_group(&mut image, group, at, options);
+            draw_group(&mut image, group, at, options, inner);
         }
     }
     Ok(image)
 }
 
-fn draw_group(image: &mut Image, group: &Group, at: &Placed, options: &PreviewOptions) {
+fn draw_group(image: &mut Image, group: &Group, at: &Placed, options: &PreviewOptions, inner: u32) {
     label::draw(
         image,
         &group.label,
@@ -195,20 +350,18 @@ fn draw_group(image: &mut Image, group: &Group, at: &Placed, options: &PreviewOp
         TEXT_SCALE,
         TEXT,
     );
-    let mut x = at.x as i64;
-    let y = (at.y + TEXT_HEIGHT + LABEL_GAP) as i64;
-    for item in &group.items {
-        let (w, _) = item_size(item, options.scale);
-        draw_item(image, item, x, y, options);
-        x += (w + ITEM_GAP) as i64;
+    let (offsets, _, _) = group_layout(group, options, inner);
+    let top = at.y + TEXT_HEIGHT + LABEL_GAP;
+    for (item, (dx, dy)) in group.items.iter().zip(offsets) {
+        draw_item(image, item, (at.x + dx) as i64, (top + dy) as i64, options);
     }
 }
 
 fn draw_item(image: &mut Image, item: &Item, x: i64, y: i64, options: &PreviewOptions) {
-    let s = options.scale;
+    let s = item_scale(item, options);
     let (iw, ih) = (item.image.width(), item.image.height());
     image.fill_rect(x, y, iw * s + 2, ih * s + 2, FRAME);
-    let grid = options.grid && s >= 4;
+    let pixel_grid = item.cell.is_none() && options.grid && s >= 4;
     for py in 0..ih {
         for px in 0..iw {
             let color = item.image.pixel(px, py).unwrap_or_default();
@@ -216,10 +369,18 @@ fn draw_item(image: &mut Image, item: &Item, x: i64, y: i64, options: &PreviewOp
             let top = y + 1 + (py * s) as i64;
             image.fill_rect(left, top, s, s, CHECKER[((px + py) % 2) as usize]);
             image.fill_rect(left, top, s, s, color);
-            if grid {
+            if pixel_grid {
                 image.fill_rect(left, top, s, 1, GRID);
                 image.fill_rect(left, top + 1, 1, s - 1, GRID);
             }
+        }
+    }
+    if let Some((cw, ch)) = item.cell.filter(|_| options.grid) {
+        for cx in (cw..iw).step_by(cw.max(1) as usize) {
+            image.fill_rect(x + 1 + (cx * s) as i64, y + 1, 1, ih * s, CELL_GRID);
+        }
+        for cy in (ch..ih).step_by(ch.max(1) as usize) {
+            image.fill_rect(x + 1, y + 1 + (cy * s) as i64, iw * s, 1, CELL_GRID);
         }
     }
     if let Some(caption) = &item.caption {

@@ -1,0 +1,116 @@
+; Layers, derived sprites and animations.
+
+palette field
+  .  transparent
+  k  #1a1c2c   ; ink
+  w  #f4f4f4
+  g  #38b764   ; leaf
+  G  #a7f070
+  b  #5d275d   ; body, dark to light
+  p  #b13e53
+  P  #ef7d57
+  o  #f4b41b   ; gold
+  y  #ffe478
+  c  #41a6f6   ; sky
+
+palette dusk from=field
+  o  #b86f50
+  y  #e4a672
+  p  #3b5dc9
+  P  #73eff7
+
+; A sprout in two layers: the body, and the face drawn over it.
+sprite sprout 12x12 palette=field
+  layer body
+    .....gG.....
+    ....gGGg....
+    .....gg.....
+    ...pppppp...
+    ..pPPPpppp..
+    .pPPpppppbp.
+    .pPppppppbp.
+    .ppppppppbp.
+    .pppppppbbp.
+    ..pppppbbp..
+    ...pp..pp...
+    ...kk..kk...
+  layer face
+    ............
+    ............
+    ............
+    ............
+    ............
+    ...wk..wk...
+    ...kk..kk...
+    ............
+    .....kk.....
+    ............
+    ............
+    ............
+
+; Derived sprites: a modifier chain after `=`.
+sprite sprout_left = sprout:flip_x
+sprite sprout_night = sprout:swap(dusk)
+sprite sprout_outlined = sprout:pad(1):outline(k)
+
+sprite coin 8x8 palette=field
+  ..kkkk..
+  .kooyyk.
+  kooyywok
+  kooyyook
+  kooooook
+  koooooyk
+  .koooyk.
+  ..kkkk..
+
+sprite coin_edge 8x8 palette=field
+  ...kkk..
+  ..koyyk.
+  ..koywk.
+  ..koyok.
+  ..koook.
+  ..kooyk.
+  ..kooyk.
+  ...kkk..
+
+sprite coin_thin 8x8 palette=field
+  ....k...
+  ...kyk..
+  ...kyk..
+  ...kok..
+  ...kok..
+  ...kok..
+  ...kyk..
+  ....k...
+
+sprite arrow 6x6 palette=field
+  ...c..
+  ....c.
+  cccccc
+  ....c.
+  ...c..
+  ......
+
+sprite arrow_down = arrow:rot90
+
+; A sprite whose layers are other sprites.
+sprite badge 8x8 palette=field
+  layer back = coin
+  layer mark = arrow:pad(1)
+
+; Animations: one frame per line, a sprite or a chain, and its ticks (60 a second).
+animation coin_spin loop
+  coin              6
+  coin_edge         6
+  coin_thin         6
+  coin_edge:flip_x  6
+
+animation sprout_idle loop
+  sprout             20
+  sprout:offset(0,1) 20
+
+animation sprout_hurt once
+  sprout:swap(dusk)  4
+  sprout             4
+  sprout:swap(dusk)  4
+  sprout             4
