@@ -1,8 +1,8 @@
 name: Rust
 
-# Runs when a release is published, or on demand from the Actions tab, to save
-# Actions minutes. Run the checks locally before each pull request (see the README).
+# Runs for every pull request, when a release is published, or on demand.
 on:
+  pull_request:
   release:
     types: [published]
   workflow_dispatch:
