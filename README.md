@@ -791,8 +791,8 @@ What spritebox does not do, as of this release:
 
 ## Development and releases
 
-CI runs only when a release is published (or on demand from the Actions tab), so run
-the checks locally before each pull request:
+CI runs for every pull request, when a release is published, and on demand from the
+Actions tab. You can also run the checks locally:
 
 ```sh
 cargo fmt --check
