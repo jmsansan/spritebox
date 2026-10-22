@@ -305,6 +305,8 @@ fn usage_and_io_errors() {
         &["lint", COIN, "--deny"],
         &["lint", COIN, "--out", "x"],
         &["check", COIN, "--strict"],
+        &["check", COIN, "--lint"],
+        &["lint", COIN, "--lint"],
         &["render", COIN, "--out", "x", "--allow", "unused_key"],
     ] {
         let out = spritebox(args);
@@ -436,5 +438,26 @@ fn lint_fails_on_warnings_past_the_limit() {
     let out = spritebox(&["lint", file, "--json"]);
     assert_eq!(out.status.code(), Some(0));
     assert!(stdout(&out).contains("],\"omitted\":251,\"written\":[]}"));
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn render_marks_lint_on_the_preview() {
+    let dir = temp_dir("render-lint");
+    let example = concat!(env!("CARGO_MANIFEST_DIR"), "/examples/lint.spritebox");
+    let (plain, marked) = (dir.join("plain"), dir.join("marked"));
+    let out = spritebox(&["render", example, "--out", plain.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let out = spritebox(&[
+        "render",
+        example,
+        "--out",
+        marked.to_str().unwrap(),
+        "--lint",
+    ]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let plain = spritebox::png::read_file(plain.join("preview.png")).unwrap();
+    let marked = spritebox::png::read_file(marked.join("preview.png")).unwrap();
+    assert!(marked.height() > plain.height());
     std::fs::remove_dir_all(dir).unwrap();
 }

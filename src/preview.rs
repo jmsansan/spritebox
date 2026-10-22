@@ -1,7 +1,7 @@
 //! Preview sheets: every definition of a document in one labelled image.
 
 use crate::label;
-use crate::{Color, Document, Image, Limits, Result};
+use crate::{Color, Document, Image, Limits, LintCode, LintOptions, Result, Sprite, Warning};
 
 /// How a preview sheet is drawn.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -13,6 +13,12 @@ pub struct PreviewOptions {
     /// The width at which rows of items wrap, in pixels. A wider item gets a row of
     /// its own and widens the sheet. Default 1024.
     pub max_width: u32,
+    /// Lint the document and mark what it reports on the sprites: a frame around
+    /// each pixel a warning is about, and the sprite's own frame for a warning about a
+    /// whole sprite, in one color for line work and one for shading and scale; with a
+    /// legend at the end. Warnings about palettes and sets are not drawn. Default
+    /// false.
+    pub lint: bool,
 }
 
 impl Default for PreviewOptions {
@@ -21,6 +27,7 @@ impl Default for PreviewOptions {
             scale: 4,
             grid: true,
             max_width: 1024,
+            lint: false,
         }
     }
 }
@@ -32,6 +39,9 @@ const CAPTION: Color = Color::rgb(0x9a, 0x9e, 0xaa);
 const FRAME: Color = Color::rgb(0x55, 0x58, 0x64);
 const CHECKER: [Color; 2] = [Color::rgb(0x6b, 0x6e, 0x78), Color::rgb(0x5c, 0x5f, 0x69)];
 const GRID: Color = Color::rgba(0, 0, 0, 56);
+/// Lint marks: line work, and shading and scale.
+const LINES: Color = Color::rgb(0xff, 0x4d, 0x6d);
+const SHADING: Color = Color::rgb(0xff, 0xd2, 0x3f);
 const CELL_GRID: Color = Color::rgba(255, 255, 255, 48);
 
 const TEXT_SCALE: u32 = 2;
@@ -51,6 +61,10 @@ pub(crate) struct Item {
     /// Grid lines every `(width, height)` pixels, such as tiles, instead of every
     /// pixel.
     pub cell: Option<(u32, u32)>,
+    /// Lint marks: pixels framed in a color.
+    pub marks: Vec<(u32, u32, Color)>,
+    /// A lint mark on the whole image: its frame in a color.
+    pub flag: Option<Color>,
 }
 
 impl Item {
@@ -60,6 +74,8 @@ impl Item {
             caption: Some(caption),
             scale: None,
             cell: None,
+            marks: Vec::new(),
+            flag: None,
         }
     }
 }
@@ -88,15 +104,24 @@ pub(crate) fn sheet(
         return Err(crate::Error::invalid("Preview scale must be 1..=64"));
     }
     let mut sections = Vec::new();
+    let lint = options
+        .lint
+        .then(|| document.lint_with(&LintOptions::default(), limits));
     if !document.sprites.is_empty() {
         sections.push(Section {
             title: "Sprites".into(),
             groups: document
                 .sprites
                 .iter()
-                .map(|s| Group {
-                    label: s.name.clone(),
-                    items: vec![Item::new(s.render(), format!("{}x{}", s.width, s.height))],
+                .map(|s| {
+                    let mut item = Item::new(s.render(), format!("{}x{}", s.width, s.height));
+                    if let Some(lint) = &lint {
+                        mark(&mut item, s, &lint.warnings);
+                    }
+                    Group {
+                        label: s.name.clone(),
+                        items: vec![item],
+                    }
                 })
                 .collect(),
         });
@@ -229,7 +254,60 @@ pub(crate) fn sheet(
             groups: Vec::new(),
         });
     }
+    if let Some(lint) = &lint {
+        sections.push(legend(lint));
+    }
     draw_sections(&sections, options, limits)
+}
+
+/// The color that marks a lint code on a sprite, if it is drawn.
+fn mark_color(code: LintCode) -> Option<Color> {
+    use LintCode::*;
+    match code {
+        OrphanPixel | Jaggy | DoubleOutline | StrayAlpha => Some(LINES),
+        PillowShading | Banding | Mixel | TooManyColors => Some(SHADING),
+        _ => None,
+    }
+}
+
+/// Marks the warnings about `sprite` on its item.
+fn mark(item: &mut Item, sprite: &Sprite, warnings: &[Warning]) {
+    for w in warnings {
+        if w.sprite.as_deref() != Some(&sprite.name) {
+            continue;
+        }
+        let Some(color) = mark_color(w.code) else {
+            continue;
+        };
+        if w.pixels.is_empty() {
+            item.flag = Some(color);
+        }
+        item.marks
+            .extend(w.pixels.iter().map(|&(x, y)| (x, y, color)));
+    }
+}
+
+/// The legend of the lint marks, with the number of warnings.
+fn legend(lint: &crate::Lint) -> Section {
+    let swatch = |color: Color, caption: &str| {
+        let mut image = Image::blank(1, 1);
+        image.fill_rect(0, 0, 1, 1, color);
+        Item {
+            scale: Some(TEXT_HEIGHT),
+            ..Item::new(image, caption.to_owned())
+        }
+    };
+    let total = lint.total();
+    Section {
+        title: format!("Lint: {total} warning{}", if total == 1 { "" } else { "s" }),
+        groups: vec![Group {
+            label: "Marked on the sprites".into(),
+            items: vec![
+                swatch(LINES, "Line work"),
+                swatch(SHADING, "Shading and scale"),
+            ],
+        }],
+    }
 }
 
 struct Placed {
@@ -382,6 +460,26 @@ fn draw_item(image: &mut Image, item: &Item, x: i64, y: i64, options: &PreviewOp
         for cy in (ch..ih).step_by(ch.max(1) as usize) {
             image.fill_rect(x + 1, y + 1 + (cy * s) as i64, iw * s, 1, CELL_GRID);
         }
+    }
+    // Lint marks: a frame around each pixel, or around the whole image.
+    for &(px, py, color) in &item.marks {
+        let left = x + 1 + (px * s) as i64;
+        let top = y + 1 + (py * s) as i64;
+        if s < 3 {
+            image.fill_rect(left, top, s, s, color);
+            continue;
+        }
+        image.fill_rect(left, top, s, 1, color);
+        image.fill_rect(left, top + s as i64 - 1, s, 1, color);
+        image.fill_rect(left, top, 1, s, color);
+        image.fill_rect(left + s as i64 - 1, top, 1, s, color);
+    }
+    if let Some(color) = item.flag {
+        let (w, h) = (iw * s + 2, ih * s + 2);
+        image.fill_rect(x, y, w, 1, color);
+        image.fill_rect(x, y + h as i64 - 1, w, 1, color);
+        image.fill_rect(x, y, 1, h, color);
+        image.fill_rect(x + w as i64 - 1, y, 1, h, color);
     }
     if let Some(caption) = &item.caption {
         let cy = y + (ih * s + 2 + LABEL_GAP) as i64;

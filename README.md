@@ -734,7 +734,7 @@ fn art(embedded: &std::collections::HashMap<&str, &str>) -> spritebox::Result<sp
 spritebox check <file> [--json]
 spritebox lint <file> [--strict] [--allow <code>]... [--deny <code>]... [--json]
 spritebox render <file> --out <dir> [--scale <n>] [--padding <n>] [--no-extrude]
-                 [--max-side <n>] [--json]
+                 [--max-side <n>] [--lint] [--json]
 spritebox font <file> --out <font.ttf> [--font <name>] [--family <name>] [--json]
 ```
 
@@ -749,7 +749,8 @@ spritebox font <file> --out <font.ttf> [--font <name>] [--family <name>] [--json
   tileset, `font-NAME.ttf` for each font, the metadata `spritebox.json`, and
   `preview.png` to `<dir>`. Nothing is written when the file
   has errors. `--scale` sets the preview's scale, and `--padding` and `--extrude`
-  the atlas's.
+  the atlas's. `--lint` marks lint's warnings on the preview's sprites, with a
+  legend (`PreviewOptions::lint` in the library).
 - `font` validates a file, then writes one of its fonts as TrueType: the only one,
   or the one `--font` names. `--family` sets the family name in the file.
 - `<file>` may be `-` for standard input.
@@ -846,6 +847,44 @@ lint allow unused_key            ; a shared palette file
 sprite sparkle 5x5 palette=dawn lint=allow(orphan_pixel)
   ...
 ```
+
+### Pixel-art rules
+
+What lint checks is what pixel artists practise, so that art made fast, or by a
+model, reads as made with care. [`examples/lint.spritebox`](examples/lint.spritebox)
+breaks each rule once, next to the same art corrected; `render --lint` marks each
+break on the preview:
+
+![Each check's example before and after, the breaks marked](docs/lint-preview.png)
+
+- **Lines are one pixel thick and step evenly.** A diagonal climbs in steps of one
+  length (`2, 2, 2`), or of lengths that grow or shrink for a curve (`1, 2, 3`); one
+  step out of rhythm is a jaggy (`jaggy`). Where a line turns, one pixel on the
+  diagonal is enough, not an L of three (`double_outline`).
+- **Every pixel earns its place.** A lone pixel barely lighter or darker than what
+  surrounds it reads as dirt, and one floating free as a speck (`orphan_pixel`);
+  translucent pixels left from smoothing blur when the art is scaled
+  (`stray_alpha`). An eye or a glint stands out, and is left alone.
+- **Light comes from somewhere.** Shading that darkens toward the edges on every
+  side looks puffed, a pillow (`pillow_shading`); light from the top left, and
+  shadow down and right, gives form. Shades laid as lines a pixel thick, each
+  following the last, show the stacking, not the shape (`banding`).
+- **Ramps turn their hue.** A material's shades go cooler (toward blue) as they
+  darken and warmer (toward yellow) as they lighten; a ramp of one hue looks flat
+  (`flat_ramp`), and steps too close in lightness cannot be told apart
+  (`low_contrast`). `ramp NAME KEYS base=#rrggbb` makes such a ramp.
+- **Few colors, each needed.** Small sprites read best with eight colors or fewer
+  (`too_many_colors`); two colors no eye can tell apart (`near_duplicate_color`), or
+  a key nothing uses (`unused_key`), are noise in the palette.
+- **One pixel size.** Art drawn at 2× next to art at 1× shows pixels of two sizes
+  (`mixel`).
+- **Sets match.** An animation's frames, a group, a tileset's tiles share their
+  size, outline, palette and pixel scale (`inconsistent_size`,
+  `inconsistent_outline`, `inconsistent_palette`, `inconsistent_scale`).
+
+Break a rule when the art needs it: a sparkle is a lone pixel, a hurt flash swaps a
+palette. Allow the code where it is meant, with `lint=allow(...)` on the definition
+and a comment saying why, rather than for the whole file.
 
 ## Limits
 

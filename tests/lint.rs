@@ -1087,3 +1087,68 @@ fn codes_have_stable_names() {
     assert_eq!(LintCode::OrphanPixel.as_str(), "orphan_pixel");
     assert_eq!(LintCode::UnusedKey.as_str(), "unused_key");
 }
+
+#[test]
+fn every_check_before_and_after() {
+    // examples/lint.spritebox names a definition CHECK_before for each check, which
+    // it reports, and CHECK_after, which it does not; nothing else is reported.
+    let text = include_str!("../examples/lint.spritebox").replace("\r\n", "\n");
+    // Each top-level definition's first line and name.
+    let defs: Vec<(usize, &str)> = text
+        .lines()
+        .enumerate()
+        .filter(|(_, l)| !l.starts_with(' ') && !l.starts_with(';') && !l.is_empty())
+        .filter_map(|(i, l)| l.split_whitespace().nth(1).map(|name| (i + 1, name)))
+        .collect();
+    let owner = |line: usize| {
+        defs.iter()
+            .take_while(|&&(start, _)| start <= line)
+            .last()
+            .map(|&(_, name)| name)
+            .unwrap_or_default()
+    };
+    let doc: Document = text.parse().unwrap();
+    let lint = doc.lint(&LintOptions::default());
+    assert_eq!(lint.omitted(), 0);
+    let mut reported: Vec<LintCode> = Vec::new();
+    for w in &lint.warnings {
+        let name = owner(w.position.unwrap().line);
+        assert_eq!(
+            name,
+            format!("{}_before", w.code.as_str()),
+            "{w:?} is in `{name}`"
+        );
+        reported.push(w.code);
+    }
+    reported.dedup();
+    assert_eq!(reported.len(), LintCode::ALL.len(), "{reported:?}");
+    for code in LintCode::ALL {
+        let before = format!("{}_before", code.as_str());
+        let after = format!("{}_after", code.as_str());
+        assert!(defs.iter().any(|&(_, n)| n == before), "{before}");
+        assert!(defs.iter().any(|&(_, n)| n == after), "{after}");
+    }
+}
+
+#[test]
+fn preview_marks_warnings() {
+    use spritebox::PreviewOptions;
+    let text = include_str!("../examples/lint.spritebox");
+    let doc: Document = text.parse().unwrap();
+    let plain = doc.preview(&PreviewOptions::default()).unwrap();
+    let marked = doc
+        .preview(&PreviewOptions {
+            lint: true,
+            ..PreviewOptions::default()
+        })
+        .unwrap();
+    // The legend goes under the sprites.
+    assert_eq!(marked.width(), plain.width());
+    assert!(marked.height() > plain.height());
+    // The same pixels on every platform: docs/lint-preview.png is this file.
+    let png = spritebox::png::encode(&marked);
+    assert!(
+        png == include_bytes!("fixtures/lint/preview.png"),
+        "the marked preview changed; if on purpose, write it to tests/fixtures/lint/ and docs/"
+    );
+}

@@ -1,0 +1,238 @@
+; Lint, before and after: for each check, a definition named CHECK_before that
+; it reports, and CHECK_after, the same art corrected, that it does not. Run
+;   spritebox lint examples/lint.spritebox
+;   spritebox render examples/lint.spritebox --out out --lint
+; to see the warnings, and the preview with each one marked.
+
+palette pal
+  .  transparent
+  k  #1a1c2c   ; outline
+  d  #5d275d   ; a ramp of warm shades, dark to light
+  m  #b13e53
+  l  #ef7d57
+  w  #ffcd75
+  g  #38b764   ; leaf
+  G  #a7f070
+  b  #3b5dc9   ; sky
+  c  #41a6f6
+  a  #ffcd7580 ; translucent highlight
+
+; Line work.
+
+; A pixel touching nothing reads as dirt.
+sprite orphan_pixel_before 6x4 palette=pal
+  .kk...
+  kggk..
+  kggk.k
+  .kk...
+sprite orphan_pixel_after 6x4 palette=pal
+  .kk...
+  kggk..
+  kggk..
+  .kk...
+
+; A step of 3 among steps of 1 breaks the line; steps that grow make a curve.
+sprite jaggy_before 12x6 palette=pal
+  .......ggggg
+  ......gggggg
+  ...ggggggggg
+  ..gggggggggg
+  .ggggggggggg
+  gggggggggggg
+sprite jaggy_after 12x6 palette=pal
+  .........ggg
+  ......gggggg
+  ....gggggggg
+  ..gggggggggg
+  .ggggggggggg
+  gggggggggggg
+
+; An outline doubled at its corners; one diagonal step is enough.
+sprite double_outline_before 8x8 palette=pal
+  k.......
+  kk......
+  kkk.....
+  kgkk....
+  kggkk...
+  kgggkk..
+  kggggkk.
+  kkkkkkkk
+sprite double_outline_after 8x8 palette=pal
+  k.......
+  kk......
+  kgk.....
+  kggk....
+  kgggk...
+  kggggk..
+  kgggggk.
+  kkkkkkkk
+
+; A translucent pixel left over from smoothing blurs when scaled.
+sprite stray_alpha_before 4x4 palette=pal
+  .aw.
+  wwww
+  wwww
+  wwww
+sprite stray_alpha_after 4x4 palette=pal
+  .ww.
+  wwww
+  wwww
+  wwww
+
+; Shading and scale.
+
+; Dark all round with the light in the middle, against light from the top left.
+sprite pillow_shading_before 14x14 palette=pal
+  ......kk......
+  ...kkkddkkk...
+  ..kdddmmdddk..
+  .kddmmmmmmddk.
+  .kdmmllllmmdk.
+  .kdmllwwllmdk.
+  kdmmlwwwwlmmdk
+  kdmmlwwwwlmmdk
+  .kdmllwwllmdk.
+  .kdmmllllmmdk.
+  .kddmmmmmmddk.
+  ..kdddmmdddk..
+  ...kkkddkkk...
+  ......kk......
+sprite pillow_shading_after 14x14 palette=pal
+  ......kk......
+  ...kkkwwkkk...
+  ..kwwwwllllk..
+  .kwwwwllllmmk.
+  .kwwwllllmmmk.
+  .kwwllllmmmmk.
+  kwwllllmmmmmmk
+  kwllllmmmmmmdk
+  .klllmmmmmmdk.
+  .kllmmmmmmddk.
+  .klmmmmmmdddk.
+  ..kmmmmmdddk..
+  ...kkkmdkkk...
+  ......kk......
+
+; A shade one pixel thick between two others stacks the shading in lines.
+sprite banding_before 8x5 palette=pal
+  dddddddd
+  mmmmmmmm
+  llllllll
+  llllllll
+  llllllll
+sprite banding_after 8x5 palette=pal
+  dddddddd
+  dddddddd
+  mmmmmmmm
+  mmmmmmmm
+  llllllll
+
+; Art drawn at 2x among art at 1x shows pixels of two sizes.
+sprite mixel_before 8x8 palette=pal
+  ....kkkk
+  ....kkkk
+  ..kkmmkk
+  ..kkmmkk
+  kkmmllkk
+  kkmmllkk
+  kkkkkkkk
+  kkkkkkkk
+sprite mixel_after 4x4 palette=pal
+  ..kk
+  .kmk
+  kmlk
+  kkkk
+
+; Nine colors in a sprite of nine pixels; eight is the most for small sprites.
+sprite too_many_colors_before 3x3 palette=pal
+  kdm
+  lwg
+  Gbc
+sprite too_many_colors_after 3x3 palette=pal
+  kdm
+  lwg
+  Gbb
+
+; Sets: sprites that belong together should match.
+
+sprite ring 4x4 palette=pal
+  .kk.
+  kggk
+  kggk
+  .kk.
+sprite ring_turned = ring:flip_y
+sprite blob 4x4 palette=pal
+  .gg.
+  gggg
+  gggg
+  .gg.
+palette dusk from=pal
+  g  #257179
+palette alien
+  .  transparent
+  k  #000000
+  g  #ff00ff
+sprite ring_dusk = ring:swap(dusk)
+sprite ring_alien = ring:swap(alien)
+
+group inconsistent_size_before double_outline_after orphan_pixel_after
+group inconsistent_size_after double_outline_after double_outline_before
+group inconsistent_outline_before ring blob
+group inconsistent_outline_after ring ring_turned
+group inconsistent_palette_before ring ring_alien
+group inconsistent_palette_after ring ring_dusk
+group inconsistent_scale_before double_outline_after mixel_before
+group inconsistent_scale_after double_outline_after double_outline_before
+
+; Palettes.
+
+; Two greens no eye can tell apart.
+palette near_duplicate_color_before
+  g  #38b764
+  h  #39b865
+sprite twins_before 2x1 palette=near_duplicate_color_before
+  gh
+palette near_duplicate_color_after
+  g  #38b764
+  h  #a7f070
+sprite twins_after 2x1 palette=near_duplicate_color_after
+  gh
+
+; Shades that only change in brightness look dull; a made ramp turns its hue.
+palette flat_ramp_before
+  1  #203020
+  2  #406040
+  3  #609060
+  4  #80c080
+  ramp moss 1234
+sprite moss_before 4x1 palette=flat_ramp_before
+  1234
+palette flat_ramp_after
+  ramp moss 1234 base=#609060
+sprite moss_after 4x1 palette=flat_ramp_after
+  1234
+
+; Two shades of one lightness cannot be told apart as steps of a ramp.
+palette low_contrast_before
+  x  #808080
+  y  #a07070
+  ramp stone xy
+sprite stone_before 2x1 palette=low_contrast_before
+  xy
+palette low_contrast_after
+  x  #404040
+  y  #a0a0a0
+  ramp stone xy
+sprite stone_after 2x1 palette=low_contrast_after
+  xy
+
+; A key that nothing uses.
+palette unused_key_before
+  k  #1a1c2c
+  z  #ffffff
+sprite dot_before 1x1 palette=unused_key_before
+  k
+palette unused_key_after
+  k  #1a1c2c
+sprite dot_after 1x1 palette=unused_key_after
+  k

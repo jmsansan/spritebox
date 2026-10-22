@@ -20,7 +20,7 @@ Usage:
       Validate a file, then print warnings where its art does not follow
       pixel-art practice. Warnings alone exit 0, unless --strict or --deny.
   spritebox render <file> --out <dir> [--scale <n>] [--padding <n>] [--no-extrude]
-                   [--max-side <n>] [--json]
+                   [--max-side <n>] [--lint] [--json]
       Validate a file, then write atlas.png, tileset-<name>.png for each
       tileset, font-<name>.ttf for each font, spritebox.json (the metadata)
       and preview.png to <dir>.
@@ -35,6 +35,7 @@ Options:
   --scale <n>   Pixels per sprite pixel in the preview, 1..=64 (default 4).
   --padding <n> Pixels around each sprite and tile in textures, 0..=64 (default 1).
   --no-extrude  Leave the padding transparent instead of copying edge pixels.
+  --lint        Mark lint warnings on the sprites of the preview, with a legend.
   --max-side <n> The largest side of a texture, 1..=8192 (default 2048).
   --font <name> The font to write, when the file has several.
   --family <n>  The family name in the TrueType file (default: the font's name).
@@ -61,6 +62,8 @@ struct Options {
     font: Option<String>,
     family: Option<String>,
     json: bool,
+    /// Mark lint warnings on the preview.
+    lint: bool,
     strict: bool,
     allow: Vec<LintCode>,
     deny: Vec<LintCode>,
@@ -100,6 +103,7 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
     let mut font = None;
     let mut family = None;
     let mut json = false;
+    let mut lint = false;
     let mut strict = false;
     let mut allow = Vec::new();
     let mut deny = Vec::new();
@@ -134,6 +138,7 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
                     .ok_or(format!("--padding must be 0..=64, not `{value}`"))?;
             }
             "--no-extrude" => atlas.extrude = false,
+            "--lint" => lint = true,
             "--max-side" => {
                 let value = iter.next().ok_or("--max-side needs a number")?;
                 atlas.max_side = value
@@ -161,6 +166,11 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
             "{command} writes no files; --out is for render and font"
         ));
     }
+    if lint && command != "render" {
+        return Err(
+            "--lint marks the preview of render; to list warnings, use the lint command".into(),
+        );
+    }
     if command != "lint" && (strict || !allow.is_empty() || !deny.is_empty()) {
         return Err("--strict, --allow and --deny are for the lint command".into());
     }
@@ -179,6 +189,7 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
         font,
         family,
         json,
+        lint,
         strict,
         allow,
         deny,
@@ -331,6 +342,7 @@ fn render(
     let preview = document.preview_with(
         &PreviewOptions {
             scale: options.scale,
+            lint: options.lint,
             ..PreviewOptions::default()
         },
         limits,
