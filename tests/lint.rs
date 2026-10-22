@@ -604,6 +604,24 @@ fn palettes_and_ramps() {
         (lint.count(LowContrast), lint.count(NearDuplicateColor)),
         (1, 1)
     );
+    // Two copies that change an inherited ramp differently each have their problem,
+    // and each copy's `lint=` allows its own.
+    let two = "palette p\n  ramp r ab\n  a #000000\n  b #ffffff\n\
+               palette q from=p\n  a #808080\n  b #848484\n\
+               palette u from=p\n  a #202020\n  b #242424\n\
+               sprite s 2x1 palette=q\n  ab\nsprite t 2x1 palette=u\n  ab\n";
+    let low = |text: &str| {
+        let doc: Document = text.parse().unwrap();
+        doc.lint(&LintOptions::default()).count(LowContrast)
+    };
+    assert_eq!(low(two), 2);
+    assert_eq!(
+        low(&two.replace(
+            "palette q from=p",
+            "palette q from=p lint=allow(low_contrast)"
+        )),
+        1
+    );
 }
 
 const SWAPS: &str = "\
@@ -653,9 +671,14 @@ fn unused_keys() {
 fn allowing_warnings() {
     let all = |text: &str| lint(text).len();
     assert_eq!(all(SWAPS), 3);
+    // `lint=` on a palette reaches the palettes copied from it, as on a sprite.
     assert_eq!(
         all(&SWAPS.replace("palette base", "palette base lint=allow(unused_key)")),
-        1
+        0
+    );
+    assert_eq!(
+        all(&SWAPS.replace("palette night", "palette night lint=allow(unused_key)")),
+        2
     );
     assert_eq!(all(&format!("lint allow unused_key\n{SWAPS}")), 0);
     assert_eq!(

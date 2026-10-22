@@ -245,8 +245,8 @@ pub(crate) struct Def {
     pub name: String,
     pub pos: Position,
     pub allow: Vec<LintCode>,
-    /// The sprites it is built from.
-    pub deps: Vec<String>,
+    /// What it is built from: the sprites of a sprite, the palette a palette copies.
+    pub deps: Vec<(Kind, String)>,
     pub detail: Detail,
 }
 
@@ -314,7 +314,7 @@ impl Sources {
             if def.allow.contains(&code) {
                 return true;
             }
-            stack.extend(def.deps.iter().map(|d| (Kind::Sprite, d.as_str())))
+            stack.extend(def.deps.iter().map(|(kind, name)| (*kind, name.as_str())))
         }
         false
     }

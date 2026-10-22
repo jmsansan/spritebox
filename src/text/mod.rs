@@ -622,7 +622,11 @@ impl<'a> Parser<'a, '_> {
                 name: p.name.text.to_owned(),
                 pos: p.name.pos,
                 allow: allow(Kind::Palette, p.name),
-                deps: Vec::new(),
+                deps: p
+                    .from
+                    .iter()
+                    .map(|t| (Kind::Palette, t.text.to_owned()))
+                    .collect(),
                 detail: Detail::Palette {
                     ramps: p
                         .ramps
@@ -645,7 +649,11 @@ impl<'a> Parser<'a, '_> {
                 name: s.name.text.to_owned(),
                 pos: s.name.pos,
                 allow: allow(Kind::Sprite, s.name),
-                deps: s.dependencies().iter().map(|t| t.text.to_owned()).collect(),
+                deps: s
+                    .dependencies()
+                    .iter()
+                    .map(|t| (Kind::Sprite, t.text.to_owned()))
+                    .collect(),
                 detail: s.detail(self.layer_counts.get(&s.name.pos)),
             });
         }

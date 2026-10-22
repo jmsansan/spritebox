@@ -810,7 +810,7 @@ point, derived sprites, which repeat their base, and font glyphs, whose dots and
 letterforms break these rules on purpose, are not checked.
 
 Some art breaks a rule on purpose. `lint=allow(CODE,...)` on a definition allows those
-codes for it and for everything built from it; `lint allow CODE...` on a line of its
+codes for it and for everything built from it (sprites made from a sprite, palettes copied from a palette); `lint allow CODE...` on a line of its
 own allows them in its file (not in the files that import it, even for sprites they build from its sprites); and
 `LintOptions::allow`, or `--allow`, everywhere:
 
