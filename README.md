@@ -51,13 +51,14 @@ are rendered with spritebox. See the [Rust generator](examples/night_shift.rs),
 | WebAssembly (`wasm32-unknown-unknown`) | Available |
 | Command-line tool: `check`, `lint`, `render`, `font` | Available |
 | Seeded procedural textures: value noise and ordered dithering | Available |
-| Lint: warnings where art is valid but strays from pixel-art practice | Available (first checks; more in 0.3) |
+| Lint: warnings where art is valid but strays from pixel-art practice, marked on previews | Available |
+| Palette ramps, declared or made with hue shifting; groups of sprites | Available |
 
 ## Install
 
 ```toml
 [dependencies]
-spritebox = "0.2"
+spritebox = "0.3"
 ```
 
 Rust 1.85 or newer. The command-line tool installs with
