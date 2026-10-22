@@ -93,19 +93,29 @@ impl Sprite {
     /// or else the topmost key. `None` where no layer covers the pixel, or outside the
     /// sprite.
     pub fn key(&self, x: u32, y: u32) -> Option<char> {
+        let layer = self.top_layer(x, y)?;
+        Some(self.layers[layer].keys[y as usize * self.width as usize + x as usize])
+    }
+
+    /// The index of the layer whose key [`Sprite::key`] sees at `(x, y)`.
+    pub(crate) fn top_layer(&self, x: u32, y: u32) -> Option<usize> {
         if x >= self.width || y >= self.height {
             return None;
         }
         let i = y as usize * self.width as usize + x as usize;
         let lookup = ColorLookup::new(&self.palette);
-        let mut keys = self
+        let mut covering = self
             .layers
             .iter()
+            .enumerate()
             .rev()
-            .map(|layer| layer.keys[i])
-            .filter(|&k| k != EMPTY);
-        let top = keys.clone().next()?;
-        Some(keys.find(|&k| lookup.get(k).a > 0).unwrap_or(top))
+            .filter(|(_, layer)| layer.keys[i] != EMPTY);
+        let (top, _) = covering.clone().next()?;
+        Some(
+            covering
+                .find(|(_, layer)| lookup.get(layer.keys[i]).a > 0)
+                .map_or(top, |(n, _)| n),
+        )
     }
 
     /// Renders the sprite to RGBA8: each layer's keys are colored by the palette and

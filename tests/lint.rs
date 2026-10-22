@@ -29,7 +29,7 @@ sprite uses_all 3x2 palette=p
 
 fn lint(text: &str) -> Vec<Warning> {
     let doc: Document = text.parse().unwrap_or_else(|e| panic!("{e}"));
-    doc.lint(&LintOptions::default())
+    doc.lint(&LintOptions::default()).warnings
 }
 
 /// The `(line, column)` of each warning with `code`.
@@ -94,6 +94,7 @@ fn orphan_pixels() {
     };
     let pixels: Vec<_> = doc
         .lint(&strict)
+        .warnings
         .into_iter()
         .flat_map(|w| w.pixels)
         .collect();
@@ -114,6 +115,24 @@ fn orphan_pixels_in_layers_and_derived_sprites() {
     // Allowing it for the base allows it for what is built from the base.
     let allowed = leaf.replace("palette=p", "palette=p lint=allow(orphan_pixel)");
     assert_eq!(orphans(&format!("{allowed}{more}")), []);
+    // Each lone pixel of a sprite made of other sprites is its own warning, though
+    // all are at its name.
+    let twice = "sprite pair 7x3 palette=p\n  ggggggg\n  ghgggHg\n  ggggggg\n\
+                 sprite both 7x3 palette=p\n  layer a = pair\n";
+    let doc: Document = format!("{P}{}", twice.replace('H', "h")).parse().unwrap();
+    let both: Vec<_> = doc
+        .lint(&LintOptions::default())
+        .warnings
+        .into_iter()
+        .filter(|w| w.sprite.as_deref() == Some("both"))
+        .map(|w| (w.position.unwrap().line, w.pixels))
+        .collect();
+    assert_eq!(both, [(14, vec![(1, 1)]), (14, vec![(5, 1)])]);
+    // A pixel seen through a layer made of another sprite is not blamed on the rows
+    // it covers.
+    let over = "sprite over 3x3 palette=p\n  layer base\n    ggg\n    ggg\n    ggg\n  \
+                layer top = leaf\n";
+    assert_eq!(orphans(&format!("{leaf}{over}")), [(12, 4), (14, 8)]);
 }
 
 const SWAPS: &str = "\
@@ -163,7 +182,7 @@ fn allowing_warnings() {
         allow: vec![LintCode::UnusedKey],
         ..LintOptions::default()
     };
-    assert!(doc.lint(&options).is_empty());
+    assert!(doc.lint(&options).is_clean());
     // Every definition takes `lint=`.
     let text = format!(
         "{P}animation a once lint=allow(orphan_pixel)\n  uses_all 1\n\
@@ -231,7 +250,7 @@ fn warnings_in_imports_name_their_file() {
     let text = "import shared.spritebox\nsprite s 3x3 palette=shared\n  ...\n  .k.\n  ...\n";
     assert!(check_with_loader(text, &Limits::default(), &mut loader).is_empty());
     let doc = Document::parse_with_loader(text, &Limits::default(), &mut loader).unwrap();
-    let warnings = doc.lint(&LintOptions::default());
+    let warnings = doc.lint(&LintOptions::default()).warnings;
     let summary: Vec<_> = warnings
         .iter()
         .map(|w| {
@@ -257,24 +276,35 @@ fn warnings_in_imports_name_their_file() {
 #[test]
 fn warnings_are_bounded() {
     let doc: Document = SWAPS.parse().unwrap();
-    let limits = Limits {
-        max_warnings: 2,
+    let limits = |max_warnings| Limits {
+        max_warnings,
         ..Limits::default()
     };
-    let warnings = doc.lint_with(&LintOptions::default(), &limits);
-    let codes: Vec<LintCode> = warnings.iter().map(|w| w.code).collect();
+    // The first warnings are kept; the counts include all of them.
+    let lint = doc.lint_with(&LintOptions::default(), &limits(2));
+    let lines: Vec<usize> = lint
+        .warnings
+        .iter()
+        .map(|w| w.position.unwrap().line)
+        .collect();
+    assert_eq!(lines, [2, 5]);
+    assert_eq!(lint.counts, [(LintCode::UnusedKey, 3)]);
+    assert_eq!((lint.total(), lint.omitted()), (3, 1));
+    assert_eq!(lint.count(LintCode::OrphanPixel), 0);
+    let none = doc.lint_with(&LintOptions::default(), &limits(0));
+    assert!(none.warnings.is_empty());
     assert_eq!(
-        codes,
-        [
-            LintCode::UnusedKey,
-            LintCode::UnusedKey,
-            LintCode::Truncated
-        ]
+        (none.total(), none.omitted(), none.is_clean()),
+        (3, 3, false)
     );
-    assert_eq!(warnings[2].position, None);
+    // Kept in order however they were found: noise found first, last in the text.
+    let text = format!("{P}sprite leaf 3x3 palette=p\n  ggg\n  ghg\n  ggg\n{SWAPS}");
+    let doc: Document = text.parse().unwrap();
+    let lint = doc.lint_with(&LintOptions::default(), &limits(1));
+    assert_eq!(lint.warnings[0].code, LintCode::OrphanPixel);
     assert_eq!(
-        warnings[2].message,
-        "3 warnings, more than the limit of 2; the rest are left out"
+        lint.counts,
+        [(LintCode::OrphanPixel, 1), (LintCode::UnusedKey, 3)]
     );
 }
 

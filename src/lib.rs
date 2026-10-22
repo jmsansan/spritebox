@@ -212,7 +212,7 @@ pub use export::{ATLAS_FILE, Export, ExportOptions, FontExport, METADATA_FILE, T
 pub use font::{Font, Glyph, TtfOptions};
 pub use image::{Color, Image};
 pub use limits::Limits;
-pub use lint::{LintCode, LintOptions, Warning};
+pub use lint::{Lint, LintCode, LintOptions, Warning};
 pub use preview::PreviewOptions;
 pub use sprite::{Insets, Palette, Sprite};
 pub use texture::{Dither, Noise, bayer};

@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use spritebox::{
-    AtlasOptions, Document, Error, ErrorCode, ExportOptions, Limits, LintCode, LintOptions,
+    AtlasOptions, Document, Error, ErrorCode, ExportOptions, Limits, Lint, LintCode, LintOptions,
     Position, PreviewOptions, TtfOptions, Warning, png,
 };
 
@@ -188,8 +188,8 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
 fn run(options: &Options) -> ExitCode {
     let text = match read_input(&options.file) {
         Ok(Ok(text)) => text,
-        Ok(Err(error)) => return report(options, &[error], &[], &[], EXIT_INVALID),
-        Err(error) => return report(options, &[error], &[], &[], EXIT_IO),
+        Ok(Err(error)) => return report(options, &[error], &[], EXIT_INVALID),
+        Err(error) => return report(options, &[error], &[], EXIT_IO),
     };
     let limits = Limits::default();
     // Imports are read from disk, relative to the file's directory.
@@ -201,27 +201,28 @@ fn run(options: &Options) -> ExitCode {
     };
     let errors = spritebox::check_with_loader(&text, &limits, &mut loader);
     if !errors.is_empty() {
-        return report(options, &errors, &[], &[], EXIT_INVALID);
+        return report(options, &errors, &[], EXIT_INVALID);
     }
     if options.command == "check" {
-        return report(options, &[], &[], &[], 0);
+        return report(options, &[], &[], 0);
     }
     let document = match Document::parse_with_loader(&text, &limits, &mut loader) {
         Ok(document) => document,
-        Err(error) => return report(options, &[error], &[], &[], EXIT_INVALID),
+        Err(error) => return report(options, &[error], &[], EXIT_INVALID),
     };
     if options.command == "lint" {
-        let warnings = document.lint_with(
+        let lint = document.lint_with(
             &LintOptions {
                 allow: options.allow.clone(),
                 ..LintOptions::default()
             },
             &limits,
         );
-        let fails = (options.strict && !warnings.is_empty())
-            || warnings.iter().any(|w| options.deny.contains(&w.code));
+        // Counts include warnings beyond the limit of those printed.
+        let fails = (options.strict && !lint.is_clean())
+            || options.deny.iter().any(|&code| lint.count(code) > 0);
         let status = if fails { EXIT_INVALID } else { 0 };
-        return report(options, &[], &warnings, &[], status);
+        return report_lint(options, &lint, status);
     }
     let out = options.out.as_deref().unwrap_or(Path::new("."));
     let result = if options.command == "font" {
@@ -230,14 +231,14 @@ fn run(options: &Options) -> ExitCode {
         render(&document, out, options, &limits)
     };
     match result {
-        Ok(written) => report(options, &[], &[], &written, 0),
+        Ok(written) => report(options, &[], &written, 0),
         Err(error) => {
             let status = match error.code {
                 ErrorCode::Io => EXIT_IO,
                 ErrorCode::InvalidArgument if options.command == "font" => EXIT_USAGE,
                 _ => EXIT_INVALID,
             };
-            report(options, &[error], &[], &[], status)
+            report(options, &[error], &[], status)
         }
     }
 }
@@ -395,11 +396,23 @@ struct Diagnostic<'d> {
     message: &'d str,
 }
 
-/// Prints the outcome and returns `status`.
-fn report(
+/// Prints lint's warnings and returns `status`.
+fn report_lint(options: &Options, lint: &Lint, status: u8) -> ExitCode {
+    print(options, &[], &lint.warnings, lint.omitted(), &[], status)
+}
+
+/// Prints errors and written files, and returns `status`.
+fn report(options: &Options, errors: &[Error], written: &[PathBuf], status: u8) -> ExitCode {
+    print(options, errors, &[], 0, written, status)
+}
+
+/// Prints the outcome and returns `status`. `omitted` warnings were left out by the
+/// limit.
+fn print(
     options: &Options,
     errors: &[Error],
     warnings: &[Warning],
+    omitted: usize,
     written: &[PathBuf],
     status: u8,
 ) -> ExitCode {
@@ -455,7 +468,11 @@ fn report(
             }
             let _ = write!(json, ",\"message\":{}}}", quote(d.message));
         }
-        json.push_str("],\"written\":[");
+        json.push(']');
+        if options.command == "lint" {
+            let _ = write!(json, ",\"omitted\":{omitted}");
+        }
+        json.push_str(",\"written\":[");
         for (i, path) in written.iter().enumerate() {
             if i > 0 {
                 json.push(',');
@@ -481,6 +498,13 @@ fn report(
         let count = |n: usize, what: &str| format!("{n} {what}{}", if n == 1 { "" } else { "s" });
         if !errors.is_empty() {
             eprintln!("{file}: {}", count(errors.len(), "error"));
+        } else if omitted > 0 {
+            let total = warnings.len() + omitted;
+            eprintln!(
+                "{file}: {}, of which the first {} are shown",
+                count(total, "warning"),
+                warnings.len()
+            );
         } else if !warnings.is_empty() {
             eprintln!("{file}: {}", count(warnings.len(), "warning"));
         } else if options.command == "check" || options.command == "lint" {

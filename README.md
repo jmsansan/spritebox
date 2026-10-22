@@ -705,7 +705,8 @@ spritebox font <file> --out <font.ttf> [--font <name>] [--family <name>] [--json
 - `lint` validates a file, then prints its [lint](#lint) warnings, as
   `file:line:column: warning[code]: message`. Warnings alone exit with 0;
   `--strict` makes any warning fail, and `--deny <code>` that code. `--allow <code>`
-  leaves a code out.
+  leaves a code out. Past 1000 warnings, the first are printed and the summary says
+  how many there are in all; with `--json`, `omitted` counts those left out.
 - `render` validates a file, then writes `atlas.png`, `tileset-NAME.png` for each
   tileset, `font-NAME.ttf` for each font, the metadata `spritebox.json`, and
   `preview.png` to `<dir>`. Nothing is written when the file
@@ -753,16 +754,18 @@ of them, ordered by position. Malformed input gives an error, never a panic.
 ## Lint
 
 A file can be valid and still look careless. `Document::lint` and `spritebox lint`
-report what pixel-art practice avoids, as `Warning` values with a stable `LintCode`,
-a message, the position of the pixel's character in its row (or of the definition),
-the sprite, and its pixels:
+report what pixel-art practice avoids. The result is a `Lint`: its `warnings`, each
+with a stable `LintCode`, a message, the position of the pixel's character in its row
+(or of the definition), the sprite and its pixels; and the `counts` of each code.
+Only the first `Limits::max_warnings` warnings are kept, in order, but the counts
+include every warning, so `--strict` and `--deny` see them all:
 
 ```rust
 use spritebox::{Document, LintOptions};
 
 fn review(text: &str) -> spritebox::Result<()> {
     let document: Document = text.parse()?;
-    for warning in document.lint(&LintOptions::default()) {
+    for warning in document.lint(&LintOptions::default()).warnings {
         eprintln!("warning[{}]: {warning}", warning.code);
     }
     Ok(())
@@ -773,7 +776,6 @@ fn review(text: &str) -> spritebox::Result<()> {
 | --- | --- |
 | `orphan_pixel` | A lone pixel on a flat area, within `LintOptions::orphan_contrast` (default 32 of 255) in lightness of the color around it: noise rather than a detail. Higher-contrast lone pixels, such as eyes and glints, are taken as deliberate. Also an opaque pixel touching nothing at all. Checked in drawn sprites of at least 3×3; not in textures, whose noise is the point, nor again in derived sprites. |
 | `unused_key` | A palette key that no sprite, frame, tile or texture ramp uses, through that palette or one copied from it. |
-| `truncated` | More than `Limits::max_warnings`; the rest are left out. |
 
 Some art breaks a rule on purpose. `lint=allow(CODE,...)` on a definition allows those
 codes for it and for everything built from it; `lint allow CODE...` on a line of its
@@ -806,7 +808,7 @@ hand-written files and untrusted input; raise them for trusted input.
 | `max_nesting` | 32 levels of palettes copied `from=` others, or of sprites derived from sprites |
 | `max_image_side` | 8192 pixels, for any image created or decoded |
 | `max_image_pixels` | 16 Mi pixels, for any image, and for all sprites together |
-| `max_warnings` | 1000 lint warnings; past it, one `truncated` warning |
+| `max_warnings` | 1000 lint warnings kept; the counts include the rest |
 
 ```rust
 use spritebox::{Document, Limits};

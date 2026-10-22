@@ -399,3 +399,42 @@ fn lint_reports_warnings() {
     );
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn lint_fails_on_warnings_past_the_limit() {
+    // 1250 unused keys, then noise that comes after the first 1000 warnings.
+    let dir = temp_dir("lint-limit");
+    let mut text = String::new();
+    let mut key = 0x100u32;
+    for p in 0..5 {
+        text.push_str(&format!("palette p{p}\n"));
+        for _ in 0..250 {
+            let k = char::from_u32(key).unwrap();
+            text.push_str(&format!("  {k} #000000\n"));
+            key += 1;
+        }
+    }
+    text.push_str(
+        "palette q\n  g #3a7d44\n  h #468a50\nsprite leaf 3x3 palette=q\n  ggg\n  ghg\n  ggg\n",
+    );
+    let file = dir.join("many.spritebox");
+    std::fs::write(&file, text).unwrap();
+    let file = file.to_str().unwrap();
+
+    let out = spritebox(&["lint", file, "--deny", "orphan_pixel"]);
+    assert_eq!(out.status.code(), Some(1));
+    let text = stderr(&out);
+    assert!(
+        !text.contains("orphan_pixel"),
+        "the noise is past the limit"
+    );
+    assert!(
+        text.ends_with(": 1251 warnings, of which the first 1000 are shown\n"),
+        "{}",
+        text.lines().last().unwrap_or_default()
+    );
+    let out = spritebox(&["lint", file, "--json"]);
+    assert_eq!(out.status.code(), Some(0));
+    assert!(stdout(&out).contains("],\"omitted\":251,\"written\":[]}"));
+    std::fs::remove_dir_all(dir).unwrap();
+}

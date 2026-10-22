@@ -64,6 +64,7 @@ pub(crate) fn parse(
         failed_fonts: Vec::new(),
         allows: Vec::new(),
         file_allows: Vec::new(),
+        layer_counts: HashMap::new(),
     };
     // Imported definitions take the place of their `import`.
     let mut walk = Walk {
@@ -156,6 +157,9 @@ struct Parser<'a, 'l> {
     allows: Vec<(Kind, Token<'a>, Vec<LintCode>)>,
     /// The lint codes that `lint allow` allows, by file.
     file_allows: Vec<(u32, Vec<LintCode>)>,
+    /// For each sprite with a size that was built, by the position of its name: how
+    /// many layers each of its written layers made.
+    layer_counts: HashMap<Position, Vec<usize>>,
 }
 
 /// The words of a definition's first line after its keyword and name: positional
@@ -463,7 +467,7 @@ impl<'a> Parser<'a, '_> {
                 pos: s.name.pos,
                 allow: allow(Kind::Sprite, s.name),
                 deps: s.dependencies().iter().map(|t| t.text.to_owned()).collect(),
-                detail: s.detail(),
+                detail: s.detail(self.layer_counts.get(&s.name.pos)),
             });
         }
         // Other definitions matter only for what they allow.

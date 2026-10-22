@@ -1,8 +1,8 @@
 use std::str::FromStr;
 
 use crate::{
-    Atlas, AtlasOptions, Error, Export, ExportOptions, Font, Image, Limits, LintOptions, Palette,
-    PreviewOptions, Result, Sprite, Tilemap, Tileset, Warning,
+    Atlas, AtlasOptions, Error, Export, ExportOptions, Font, Image, Limits, Lint, LintOptions,
+    Palette, PreviewOptions, Result, Sprite, Tilemap, Tileset,
 };
 
 /// An animation: frames shown in order, each for a number of ticks.
@@ -220,9 +220,9 @@ impl Document {
     }
 
     /// Checks the art against pixel-art practice, within the default [`Limits`]: the
-    /// warnings, ordered by file, then position, then code. The text silences a code
-    /// for a definition and what is built from it with `lint=allow(CODE,...)`, and for
-    /// a whole file with `lint allow CODE...`.
+    /// warnings, ordered by file, then position, then code, and how many there are of
+    /// each code. The text silences a code for a definition and what is built from it
+    /// with `lint=allow(CODE,...)`, and for a whole file with `lint allow CODE...`.
     ///
     /// ```
     /// use spritebox::{Document, LintCode, LintOptions};
@@ -238,19 +238,22 @@ impl Document {
     ///   ghg
     ///   ggg
     /// ".parse()?;
-    /// let warnings = document.lint(&LintOptions::default());
+    /// let lint = document.lint(&LintOptions::default());
+    /// assert_eq!(lint.count(LintCode::OrphanPixel), 1);
+    /// let warnings = &lint.warnings;
     /// let codes: Vec<LintCode> = warnings.iter().map(|w| w.code).collect();
     /// assert_eq!(codes, [LintCode::UnusedKey, LintCode::OrphanPixel]);
     /// assert_eq!(warnings[1].position.unwrap().line, 9);
     /// assert_eq!(warnings[1].pixels, [(1, 1)]);
     /// # Ok::<(), spritebox::Error>(())
     /// ```
-    pub fn lint(&self, options: &LintOptions) -> Vec<Warning> {
+    pub fn lint(&self, options: &LintOptions) -> Lint {
         self.lint_with(options, &Limits::default())
     }
 
-    /// [`Document::lint`] within `limits`, which bound the number of warnings.
-    pub fn lint_with(&self, options: &LintOptions, limits: &Limits) -> Vec<Warning> {
+    /// [`Document::lint`] within `limits`, which bound the number of warnings kept;
+    /// the counts include those left out.
+    pub fn lint_with(&self, options: &LintOptions, limits: &Limits) -> Lint {
         crate::lint::run(self, options, limits)
     }
 

@@ -5,11 +5,12 @@
 ### Added
 
 - Lint (#21): `Document::lint` and `spritebox lint` report art that is valid but
-  strays from pixel-art practice, as `Warning` values with a stable `LintCode`, the
-  position of the pixel's character in its row, the sprite and its pixels. The first
-  checks are `orphan_pixel` and `unused_key`. `lint=allow(CODE,...)` on any
-  definition and `lint allow CODE...` in a file allow codes on purpose; `--strict`
-  and `--deny` make warnings fail. `Limits::max_warnings` bounds the output.
+  strays from pixel-art practice. A `Lint` holds `Warning` values with a stable
+  `LintCode`, the position of the pixel's character in its row, the sprite and its
+  pixels, and the count of each code. The first checks are `orphan_pixel` and
+  `unused_key`. `lint=allow(CODE,...)` on any definition and `lint allow CODE...` in
+  a file allow codes on purpose; `--strict` and `--deny` make warnings fail.
+  `Limits::max_warnings` bounds the warnings kept, not the counts.
 - The command-line tool's JSON diagnostics have a `severity`, `error` or `warning`.
 
 ### Changed

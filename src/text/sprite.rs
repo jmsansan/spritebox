@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use super::chain::{self, Chain};
 use super::lex::{Node, Token};
 use super::{Header, Parsed, Parser, check_name, duplicate, size};
-use crate::lint::{Detail, Kind};
+use crate::lint::{Detail, DrawnLayer, Kind};
 use crate::sprite::{Insets, Layer};
 use crate::{Error, ErrorCode, Palette, Position, Sprite};
 
@@ -48,17 +48,20 @@ pub(crate) enum Source<'a> {
 }
 
 impl SpriteDef<'_> {
-    /// How the sprite is written, for lint.
-    pub(super) fn detail(&self) -> Detail {
+    /// How the sprite is written, for lint, with the number of layers that each of
+    /// its written layers made, once built.
+    pub(super) fn detail(&self, counts: Option<&Vec<usize>>) -> Detail {
         match &self.body {
             Body::Grid { layers, .. } => Detail::Drawn(
                 layers
                     .iter()
-                    .filter_map(|l| match &l.source {
-                        Source::Rows(rows) => {
-                            Some(rows.iter().map(|r| (r.pos, r.text.to_owned())).collect())
-                        }
-                        Source::Chain(_) => None,
+                    .enumerate()
+                    .map(|(i, l)| DrawnLayer {
+                        layers: counts.and_then(|c| c.get(i)).copied().unwrap_or(0),
+                        rows: match &l.source {
+                            Source::Rows(rows) => Some(rows.iter().map(|r| r.pos).collect()),
+                            Source::Chain(_) => None,
+                        },
                     })
                     .collect(),
             ),
@@ -481,9 +484,11 @@ impl<'a> Parser<'a, '_> {
             } => {
                 let palette = self.sprite_palette(def.name, *palette, palettes);
                 let mut out = Vec::new();
+                let mut counts = Vec::new();
                 let mut depth = 0;
                 let mut ok = *complete && palette.is_some();
                 for layer in layers {
+                    counts.push(out.len());
                     let layer_name = layer.name.map(|t| t.text.to_owned());
                     match &layer.source {
                         Source::Rows(rows) => {
@@ -546,6 +551,10 @@ impl<'a> Parser<'a, '_> {
                     ));
                     ok = false;
                 }
+                // From where each layer starts to how many layers it made.
+                counts.push(out.len());
+                let counts = counts.windows(2).map(|w| w[1] - w[0]).collect();
+                self.layer_counts.insert(def.name.pos, counts);
                 match (ok, palette) {
                     (true, Some(palette)) => Some((
                         Sprite {
