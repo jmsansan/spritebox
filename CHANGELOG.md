@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Lint (#21): `Document::lint` and `spritebox lint` report art that is valid but
+  strays from pixel-art practice. A `Lint` holds `Warning` values with a stable
+  `LintCode`, the position of the pixel's character in its row, the sprite and its
+  pixels, and the count of each code. The first checks are `orphan_pixel` and
+  `unused_key`. `lint=allow(CODE,...)` on any definition and `lint allow CODE...` in
+  a file allow codes on purpose; `--strict` and `--deny` make warnings fail.
+  `Limits::max_warnings` bounds the warnings kept, not the counts.
+- The command-line tool's JSON diagnostics have a `severity`, `error` or `warning`.
+
+### Changed
+
+- The showcase example's `dusk` palette no longer overrides keys its sprite does not
+  use, which lint reported.
+
 ## 0.2.0
 
 Procedural textures, the last step of the initial plan, and a fix for Windows.

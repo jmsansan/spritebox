@@ -75,10 +75,10 @@ fn check_invalid_file() {
     let json = stdout(&out);
     assert!(json.contains("\"ok\":false"), "{json}");
     assert!(json.contains(
-        "{\"code\":\"invalid_argument\",\"line\":2,\"column\":5,\"message\":\"Color `#000` must be `#rrggbb`, `#rrggbbaa` or `transparent`\"}"
+        "{\"code\":\"invalid_argument\",\"severity\":\"error\",\"line\":2,\"column\":5,\"message\":\"Color `#000` must be `#rrggbb`, `#rrggbbaa` or `transparent`\"}"
     ), "{json}");
     assert!(
-        json.contains("{\"code\":\"unknown_name\",\"line\":4,\"column\":4,"),
+        json.contains("{\"code\":\"unknown_name\",\"severity\":\"error\",\"line\":4,\"column\":4,"),
         "{json}"
     );
     std::fs::remove_dir_all(dir).unwrap();
@@ -102,7 +102,7 @@ fn check_reads_standard_input_and_rejects_bad_utf8() {
     assert_eq!(out.status.code(), Some(1));
     let json = stdout(&out);
     assert!(json.contains("\"file\":\"<stdin>\""), "{json}");
-    assert!(json.contains("{\"code\":\"syntax\",\"line\":3,\"column\":3,\"message\":\"The text is not valid UTF-8\"}"), "{json}");
+    assert!(json.contains("{\"code\":\"syntax\",\"severity\":\"error\",\"line\":3,\"column\":3,\"message\":\"The text is not valid UTF-8\"}"), "{json}");
 }
 
 #[test]
@@ -301,6 +301,11 @@ fn usage_and_io_errors() {
         &["font", COIN],
         &["render", COIN, "--out", "x", "--font", "hud"],
         &["render", COIN, "--out", "x", "--padding", "65"],
+        &["lint", COIN, "--allow", "nope"],
+        &["lint", COIN, "--deny"],
+        &["lint", COIN, "--out", "x"],
+        &["check", COIN, "--strict"],
+        &["render", COIN, "--out", "x", "--allow", "unused_key"],
     ] {
         let out = spritebox(args);
         assert_eq!(out.status.code(), Some(2), "{args:?}");
@@ -318,4 +323,118 @@ fn usage_and_io_errors() {
         stdout(&out),
         format!("spritebox {}\n", env!("CARGO_PKG_VERSION"))
     );
+}
+
+#[test]
+fn lint_reports_warnings() {
+    let dir = temp_dir("lint");
+    let file = dir.join("noisy.spritebox");
+    std::fs::write(
+        &file,
+        "palette p\n  g #3a7d44\n  h #468a50\n  k #000000\n\
+         sprite leaf 3x3 palette=p\n  ggg\n  ghg\n  ggg\n",
+    )
+    .unwrap();
+    let file = file.to_str().unwrap();
+
+    // Warnings alone succeed.
+    let out = spritebox(&["lint", file]);
+    assert_eq!(out.status.code(), Some(0));
+    let text = stderr(&out);
+    assert!(
+        text.contains(&format!(
+            "{file}:4:3: warning[unused_key]: Nothing uses key `k` of palette `p`"
+        )),
+        "{text}"
+    );
+    assert!(
+        text.contains(&format!("{file}:7:4: warning[orphan_pixel]: A lone pixel")),
+        "{text}"
+    );
+    assert!(text.ends_with(": 2 warnings\n"), "{text}");
+
+    // --strict fails on any warning, --deny on its codes; --allow drops a code.
+    assert_eq!(
+        spritebox(&["lint", file, "--strict"]).status.code(),
+        Some(1)
+    );
+    assert_eq!(
+        spritebox(&["lint", file, "--deny", "orphan_pixel"])
+            .status
+            .code(),
+        Some(1)
+    );
+    let out = spritebox(&[
+        "lint",
+        file,
+        "--allow",
+        "orphan_pixel",
+        "--deny",
+        "orphan_pixel",
+    ]);
+    assert_eq!(out.status.code(), Some(0));
+    assert!(stderr(&out).ends_with(": 1 warning\n"), "{}", stderr(&out));
+
+    let out = spritebox(&["lint", file, "--json", "--strict"]);
+    assert_eq!(out.status.code(), Some(1));
+    let json = stdout(&out);
+    assert!(json.contains("\"ok\":false"), "{json}");
+    assert!(
+        json.contains("{\"code\":\"unused_key\",\"severity\":\"warning\",\"line\":4,\"column\":3,"),
+        "{json}"
+    );
+
+    // A clean file, and a file with errors, which are not linted.
+    let out = spritebox(&["lint", COIN, "--strict"]);
+    assert_eq!(out.status.code(), Some(0));
+    assert!(stdout(&out).ends_with(": ok\n"), "{}", stdout(&out));
+    let bad = dir.join("bad.spritebox");
+    std::fs::write(&bad, "palette p\n  g #3a7d4\n").unwrap();
+    let out = spritebox(&["lint", bad.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        stderr(&out).contains("error[invalid_argument]"),
+        "{}",
+        stderr(&out)
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn lint_fails_on_warnings_past_the_limit() {
+    // 1250 unused keys, then noise that comes after the first 1000 warnings.
+    let dir = temp_dir("lint-limit");
+    let mut text = String::new();
+    let mut key = 0x100u32;
+    for p in 0..5 {
+        text.push_str(&format!("palette p{p}\n"));
+        for _ in 0..250 {
+            let k = char::from_u32(key).unwrap();
+            text.push_str(&format!("  {k} #000000\n"));
+            key += 1;
+        }
+    }
+    text.push_str(
+        "palette q\n  g #3a7d44\n  h #468a50\nsprite leaf 3x3 palette=q\n  ggg\n  ghg\n  ggg\n",
+    );
+    let file = dir.join("many.spritebox");
+    std::fs::write(&file, text).unwrap();
+    let file = file.to_str().unwrap();
+
+    let out = spritebox(&["lint", file, "--deny", "orphan_pixel"]);
+    assert_eq!(out.status.code(), Some(1));
+    let text = stderr(&out);
+    assert!(
+        !text.contains("orphan_pixel"),
+        "the noise is past the limit"
+    );
+    assert!(
+        text.ends_with(": 1251 warnings, of which the first 1000 are shown\n"),
+        "{}",
+        text.lines().last().unwrap_or_default()
+    );
+    let out = spritebox(&["lint", file, "--json"]);
+    assert_eq!(out.status.code(), Some(0));
+    assert!(stdout(&out).contains("],\"omitted\":251,\"written\":[]}"));
+    std::fs::remove_dir_all(dir).unwrap();
 }

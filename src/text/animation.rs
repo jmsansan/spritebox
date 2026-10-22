@@ -24,9 +24,12 @@ impl<'a> Parser<'a, '_> {
             .get(1)
             .ok_or_else(|| tokens[0].end_error("Expected a name for the animation".to_owned()))?;
         check_name(name)?;
-        let looping = match tokens.get(2).map(|t| t.text) {
+        // `loop` or `once`, then `lint=`, both optional.
+        let mut rest = &tokens[2..];
+        let looping = match rest.first().map(|t| t.text) {
             None | Some("loop") => true,
             Some("once") => false,
+            Some(other) if other.starts_with("lint=") => true,
             Some(other) => {
                 return Err(tokens[2].error(
                     ErrorCode::Syntax,
@@ -34,12 +37,28 @@ impl<'a> Parser<'a, '_> {
                 ));
             }
         };
-        if let Some(extra) = tokens.get(3) {
+        if rest
+            .first()
+            .is_some_and(|t| t.text == "loop" || t.text == "once")
+        {
+            rest = &rest[1..];
+        }
+        let lint = rest.first().and_then(|t| {
+            t.text.strip_prefix("lint=").map(|value| Token {
+                text: value,
+                pos: t.at("lint=".len()),
+            })
+        });
+        if lint.is_some() {
+            rest = &rest[1..];
+        }
+        if let Some(extra) = rest.first() {
             return Err(extra.error(
                 ErrorCode::Syntax,
                 format!("Unexpected `{}` after `{}`", extra.text, tokens[2].text),
             ));
         }
+        self.lint_option(crate::lint::Kind::Animation, name, lint)?;
         if node.children.is_empty() {
             return Err(name.error(
                 ErrorCode::Syntax,
@@ -152,7 +171,7 @@ impl<'a> Parser<'a, '_> {
                         ok = false;
                         continue;
                     };
-                    match chain.apply(base, palettes, self.limits) {
+                    match chain.apply(base, palettes, self.limits, &mut self.palette_uses) {
                         Ok(mut sprite) => {
                             sprite.name = name.clone();
                             built.push((sprite, chain.base.pos));

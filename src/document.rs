@@ -1,8 +1,8 @@
 use std::str::FromStr;
 
 use crate::{
-    Atlas, AtlasOptions, Error, Export, ExportOptions, Font, Image, Limits, Palette,
-    PreviewOptions, Result, Sprite, Tilemap, Tileset,
+    Atlas, AtlasOptions, Error, Export, ExportOptions, Font, Image, Limits, Lint, LintOptions,
+    Palette, PreviewOptions, Result, Sprite, Tilemap, Tileset,
 };
 
 /// An animation: frames shown in order, each for a number of ticks.
@@ -94,6 +94,8 @@ pub struct Document {
     pub(crate) tilesets: Vec<Tileset>,
     pub(crate) tilemaps: Vec<Tilemap>,
     pub(crate) fonts: Vec<Font>,
+    /// Where the definitions are in the text, for [`Document::lint`].
+    pub(crate) sources: crate::lint::Sources,
 }
 
 impl Document {
@@ -215,6 +217,44 @@ impl Document {
     /// [`Document::export`] within `limits`.
     pub fn export_with(&self, options: &ExportOptions, limits: &Limits) -> Result<Export> {
         crate::export::build(self, options, limits)
+    }
+
+    /// Checks the art against pixel-art practice, within the default [`Limits`]: the
+    /// warnings, ordered by file, then position, then code, and how many there are of
+    /// each code. The text silences a code for a definition and what is built from it
+    /// with `lint=allow(CODE,...)`, and for a whole file with `lint allow CODE...`.
+    ///
+    /// ```
+    /// use spritebox::{Document, LintCode, LintOptions};
+    ///
+    /// let document: Document = "
+    /// palette p
+    ///   g  #3a7d44
+    ///   h  #468a50
+    ///   k  #000000
+    ///
+    /// sprite leaf 3x3 palette=p
+    ///   ggg
+    ///   ghg
+    ///   ggg
+    /// ".parse()?;
+    /// let lint = document.lint(&LintOptions::default());
+    /// assert_eq!(lint.count(LintCode::OrphanPixel), 1);
+    /// let warnings = &lint.warnings;
+    /// let codes: Vec<LintCode> = warnings.iter().map(|w| w.code).collect();
+    /// assert_eq!(codes, [LintCode::UnusedKey, LintCode::OrphanPixel]);
+    /// assert_eq!(warnings[1].position.unwrap().line, 9);
+    /// assert_eq!(warnings[1].pixels, [(1, 1)]);
+    /// # Ok::<(), spritebox::Error>(())
+    /// ```
+    pub fn lint(&self, options: &LintOptions) -> Lint {
+        self.lint_with(options, &Limits::default())
+    }
+
+    /// [`Document::lint`] within `limits`, which bound the number of warnings kept;
+    /// the counts include those left out.
+    pub fn lint_with(&self, options: &LintOptions, limits: &Limits) -> Lint {
+        crate::lint::run(self, options, limits)
     }
 
     /// Draws a preview sheet: every definition, scaled up, on a grid and labelled with

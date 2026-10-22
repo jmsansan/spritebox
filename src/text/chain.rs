@@ -69,10 +69,21 @@ impl<'a> Chain<'a> {
         (chain, flip_x, flip_y)
     }
 
-    /// Applies the modifiers to `sprite`, the chain's base.
-    pub fn apply(&self, sprite: &Sprite, palettes: &[Palette], limits: &Limits) -> Parsed<Sprite> {
+    /// Applies the modifiers to `sprite`, the chain's base. Before each modifier, adds
+    /// to `uses` the sprite's palette and keys then: every key that a step can depend
+    /// on, though a later step may swap or move it out of the result.
+    pub fn apply(
+        &self,
+        sprite: &Sprite,
+        palettes: &[Palette],
+        limits: &Limits,
+        uses: &mut PaletteUses,
+    ) -> Parsed<Sprite> {
         let mut sprite = sprite.clone();
         for (token, op) in &self.ops {
+            for key in sprite.keys() {
+                uses.insert((sprite.palette.name.clone(), key));
+            }
             sprite = match op {
                 Op::FlipX => sprite.flip_x(),
                 Op::FlipY => sprite.flip_y(),
@@ -104,6 +115,9 @@ impl<'a> Chain<'a> {
         Ok(sprite)
     }
 }
+
+/// Palettes and the keys that sprites used from them midway through chains.
+pub(crate) type PaletteUses = std::collections::BTreeSet<(String, char)>;
 
 /// Parses a chain from one word.
 pub(crate) fn parse<'a>(token: Token<'a>, limits: &Limits) -> Parsed<Chain<'a>> {

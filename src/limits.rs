@@ -42,6 +42,9 @@ pub struct Limits {
     /// Pixels of any image the crate creates or decodes, and of all the sprites of a
     /// document together. Default 16 Mi (64 MiB of RGBA8).
     pub max_image_pixels: u64,
+    /// Warnings that [`Document::lint`](crate::Document::lint) keeps; its counts
+    /// include those left out. Default 1000.
+    pub max_warnings: usize,
 }
 
 impl Default for Limits {
@@ -59,6 +62,7 @@ impl Default for Limits {
             max_nesting: 32,
             max_image_side: 8192,
             max_image_pixels: 16 * 1024 * 1024,
+            max_warnings: 1000,
         }
     }
 }

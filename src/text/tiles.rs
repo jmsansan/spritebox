@@ -86,7 +86,9 @@ impl<'a> Parser<'a, '_> {
             None => None,
         };
         let name = header.name;
-        header.finish("tileset", "`palette=` or `columns=`")?;
+        let lint = header.option("lint");
+        header.finish("tileset", "`palette=`, `columns=` or `lint=`")?;
+        self.lint_option(crate::lint::Kind::Tileset, name, lint)?;
         let mut entries: Vec<Entry<'a>> = Vec::new();
         let mut complete = true;
         let mut names: HashMap<&str, Position> = HashMap::new();
@@ -328,7 +330,9 @@ impl<'a> Parser<'a, '_> {
             }
         };
         let name = header.name;
-        header.finish("tilemap", "`tileset=` or `outside=`")?;
+        let lint = header.option("lint");
+        header.finish("tilemap", "`tileset=`, `outside=` or `lint=`")?;
+        self.lint_option(crate::lint::Kind::Tilemap, name, lint)?;
         let mut legend = Vec::new();
         let mut keys = Vec::new();
         let mut rows = Vec::new();
@@ -614,13 +618,14 @@ impl<'a> Parser<'a, '_> {
                     }
                     return None;
                 };
-                let mut sprite = match chain.apply(base, palettes, self.limits) {
-                    Ok(s) => s,
-                    Err(e) => {
-                        self.errors.push(e);
-                        return None;
-                    }
-                };
+                let mut sprite =
+                    match chain.apply(base, palettes, self.limits, &mut self.palette_uses) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            self.errors.push(e);
+                            return None;
+                        }
+                    };
                 if (sprite.width, sprite.height) != (def.width, def.height) {
                     self.errors.push(chain.base.error(
                         ErrorCode::SizeMismatch,

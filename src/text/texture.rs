@@ -44,7 +44,9 @@ impl<'a> Parser<'a, '_> {
             None => 0,
         };
         let name = header.name;
-        header.finish("texture", "`palette=` or `seed=`")?;
+        let lint = header.option("lint");
+        header.finish("texture", "`palette=`, `seed=` or `lint=`")?;
+        self.lint_option(crate::lint::Kind::Sprite, name, lint)?;
 
         let mut noise: Option<Noise> = None;
         let mut ramp: Option<Vec<Token<'a>>> = None;

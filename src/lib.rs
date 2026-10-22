@@ -162,6 +162,14 @@
 //! squares, with the em at the glyph height, so it is crisp at integer multiples of
 //! its pixel size.
 //!
+//! # Lint
+//!
+//! [`Document::lint`] reports art that is valid but strays from pixel-art practice,
+//! such as noise pixels or unused palette keys, as [`Warning`]s with a stable
+//! [`LintCode`] and the position of the pixel's character in its row.
+//! `lint=allow(CODE,...)` on a definition, and `lint allow CODE...` in a file, allow
+//! codes on purpose.
+//!
 //! # Errors
 //!
 //! Errors are [`Error`] values with a stable [`ErrorCode`] and, for text, the
@@ -188,6 +196,7 @@ mod image;
 mod json;
 mod label;
 mod limits;
+mod lint;
 pub mod png;
 mod preview;
 mod sprite;
@@ -203,6 +212,7 @@ pub use export::{ATLAS_FILE, Export, ExportOptions, FontExport, METADATA_FILE, T
 pub use font::{Font, Glyph, TtfOptions};
 pub use image::{Color, Image};
 pub use limits::Limits;
+pub use lint::{Lint, LintCode, LintOptions, Warning};
 pub use preview::PreviewOptions;
 pub use sprite::{Insets, Palette, Sprite};
 pub use texture::{Dither, Noise, bayer};

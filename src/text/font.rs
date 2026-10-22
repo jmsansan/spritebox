@@ -47,10 +47,12 @@ impl<'a> Parser<'a, '_> {
             None => None,
         };
         let name = header.name;
+        let lint = header.option("lint");
         header.finish(
             "font",
-            "`height=`, `baseline=`, `line_height=`, `spacing=`, `space=` or `covers=`",
+            "`height=`, `baseline=`, `line_height=`, `spacing=`, `space=`, `covers=` or `lint=`",
         )?;
+        self.lint_option(crate::lint::Kind::Font, name, lint)?;
 
         let mut glyphs: Vec<Glyph> = Vec::new();
         let mut seen: HashMap<char, Position> = HashMap::new();
