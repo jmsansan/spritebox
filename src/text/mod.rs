@@ -65,7 +65,7 @@ pub(crate) fn parse(
         allows: Vec::new(),
         file_allows: Vec::new(),
         layer_counts: HashMap::new(),
-        palette_uses: Vec::new(),
+        palette_uses: chain::PaletteUses::new(),
     };
     // Imported definitions take the place of their `import`.
     let mut walk = Walk {

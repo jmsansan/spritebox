@@ -69,9 +69,9 @@ impl<'a> Chain<'a> {
         (chain, flip_x, flip_y)
     }
 
-    /// Applies the modifiers to `sprite`, the chain's base. Before each `swap`, adds
-    /// to `uses` the palette swapped from and the keys the sprite has then, which the
-    /// result no longer shows.
+    /// Applies the modifiers to `sprite`, the chain's base. Before each modifier, adds
+    /// to `uses` the sprite's palette and keys then: every key that a step can depend
+    /// on, though a later step may swap or move it out of the result.
     pub fn apply(
         &self,
         sprite: &Sprite,
@@ -81,6 +81,9 @@ impl<'a> Chain<'a> {
     ) -> Parsed<Sprite> {
         let mut sprite = sprite.clone();
         for (token, op) in &self.ops {
+            for key in sprite.keys() {
+                uses.insert((sprite.palette.name.clone(), key));
+            }
             sprite = match op {
                 Op::FlipX => sprite.flip_x(),
                 Op::FlipY => sprite.flip_y(),
@@ -100,7 +103,6 @@ impl<'a> Chain<'a> {
                                     format!("Unknown palette `{}`", name.text),
                                 )
                             })?;
-                    uses.push((sprite.palette.name.clone(), sprite.keys()));
                     sprite
                         .with_palette(palette)
                         .map_err(|e| name.error(e.code, e.message))?
@@ -115,7 +117,7 @@ impl<'a> Chain<'a> {
 }
 
 /// Palettes and the keys that sprites used from them midway through chains.
-pub(crate) type PaletteUses = Vec<(String, Vec<char>)>;
+pub(crate) type PaletteUses = std::collections::BTreeSet<(String, char)>;
 
 /// Parses a chain from one word.
 pub(crate) fn parse<'a>(token: Token<'a>, limits: &Limits) -> Parsed<Chain<'a>> {

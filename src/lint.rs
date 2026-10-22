@@ -164,7 +164,7 @@ pub(crate) struct Sources {
     pub defs: Vec<Def>,
     /// Palettes and the keys that sprites used from them midway through chains, such
     /// as `q` in `s:swap(q):outline(k):swap(p)`.
-    pub palette_uses: Vec<(String, Vec<char>)>,
+    pub palette_uses: std::collections::BTreeSet<(String, char)>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -532,10 +532,8 @@ fn unused_keys(document: &Document, index: &Index, sink: &mut Sink) {
             mark(&sprite.palette.name, key);
         }
     }
-    for (palette, keys) in &sources.palette_uses {
-        for &key in keys {
-            mark(palette, key);
-        }
+    for (palette, key) in &sources.palette_uses {
+        mark(palette, *key);
     }
     for def in &sources.defs {
         if let Detail::Texture(ramp) = &def.detail {

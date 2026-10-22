@@ -168,6 +168,10 @@ fn unused_keys() {
                   palette q\n  . transparent\n  a #00ff00\n  k #111111\n\
                   sprite s 3x1 palette=p\n  .a.\nsprite t = s:swap(q):outline(k):swap(p)\n";
     assert_eq!(found(midway, LintCode::UnusedKey), []);
+    // Even when a later step moves those keys out of the result. (Nothing outlines
+    // with `p`'s `k` any more.)
+    let gone = midway.replace(":swap(p)", ":offset(2,0)");
+    assert_eq!(found(&gone, LintCode::UnusedKey), [(4, 3)]);
     assert_eq!(
         found(&midway.replace(":swap(q)", ""), LintCode::UnusedKey),
         [(6, 3), (7, 3), (8, 3)]
