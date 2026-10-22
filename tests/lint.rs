@@ -352,6 +352,147 @@ fn stray_alpha() {
     assert_eq!(line_work(ghost, LintCode::StrayAlpha), []);
 }
 
+const SHADING: &str = include_str!("fixtures/lint/shading.spritebox");
+
+/// The code and sprite of each warning of `text` with `options`.
+fn reported(text: &str, options: &LintOptions) -> Vec<(LintCode, String)> {
+    let doc: Document = text.parse().unwrap();
+    doc.lint(options)
+        .warnings
+        .into_iter()
+        .map(|w| (w.code, w.sprite.unwrap_or_default()))
+        .collect()
+}
+
+#[test]
+fn shading_and_scale() {
+    // Git may check the fixture out with CRLF line ends, which the parser reads but
+    // the searches below do not.
+    let shading = SHADING.replace("\r\n", "\n");
+    let shading = shading.as_str();
+    let found = reported(shading, &LintOptions::default());
+    let expected = [
+        (LintCode::PillowShading, "pillow"),
+        (LintCode::Banding, "bands"),
+        (LintCode::Mixel, "big"),
+        (LintCode::TooManyColors, "rainbow"),
+    ];
+    let expected: Vec<(LintCode, String)> =
+        expected.iter().map(|&(c, s)| (c, s.to_owned())).collect();
+    assert_eq!(found, expected);
+    // The thresholds are options.
+    let lenient = LintOptions {
+        pillow_offset: 0,
+        banding_length: 9,
+        max_colors_small: 9,
+        ..LintOptions::default()
+    };
+    // An offset of zero still finds the pillow, whose light is exactly in the middle.
+    let found = reported(shading, &lenient);
+    assert_eq!(
+        found,
+        [
+            (LintCode::PillowShading, "pillow".to_owned()),
+            (LintCode::Mixel, "big".to_owned())
+        ]
+    );
+    // Short bands crossing are not one long band.
+    let cross = format!(
+        "{}sprite cross 5x5 palette=p\n  ddddd\n  dmlmd\n  ddmld\n  dmlmd\n  ddddd\n",
+        shading.split("sprite pillow").next().unwrap()
+    );
+    let banded = reported(&cross, &LintOptions::default())
+        .into_iter()
+        .filter(|(c, _)| *c == LintCode::Banding)
+        .count();
+    assert_eq!(banded, 0);
+    // A panel's bevel is shaded so on purpose.
+    let panel = shading.replace(
+        "sprite pillow 14x14 palette=p",
+        "sprite pillow 14x14 palette=p slice=3",
+    );
+    assert_eq!(reported(&panel, &LintOptions::default()).len(), 3);
+    // A document drawn at 2x throughout is consistent.
+    let alone = shading.split("sprite pillow").next().unwrap().to_owned()
+        + "sprite big"
+        + shading
+            .split("sprite big")
+            .nth(1)
+            .unwrap()
+            .split("sprite rainbow")
+            .next()
+            .unwrap();
+    let keys = LintOptions {
+        allow: vec![LintCode::UnusedKey],
+        ..LintOptions::default()
+    };
+    assert_eq!(reported(&alone, &keys), []);
+    // Rings around a square: where the lighter half ends within a shade, no part of
+    // that shade is favoured, so the light stays in the middle.
+    let mut square = String::from("sprite square 12x12 palette=p\n");
+    for y in 0..12i32 {
+        let row: String = (0..12i32)
+            .map(|x| {
+                let ring = x.min(y).min(11 - x).min(11 - y);
+                match ring {
+                    0 => '.',
+                    1 => 'k',
+                    2 | 3 => 'd',
+                    4 => 'm',
+                    _ => 'w',
+                }
+            })
+            .collect();
+        square += &format!("  {row}\n");
+    }
+    let palette = shading.split("sprite pillow").next().unwrap();
+    let found = reported(&format!("{palette}{square}"), &keys);
+    // (Its ring one pixel thick is banding too.)
+    assert!(
+        found.contains(&(LintCode::PillowShading, "square".to_owned())),
+        "{found:?}"
+    );
+    // What counts is the color seen: a translucent glaze over the outline and the
+    // fill does not hide the pillow under it.
+    let rows: Vec<&str> = shading
+        .split("sprite pillow 14x14 palette=p\n")
+        .nth(1)
+        .unwrap()
+        .lines()
+        .take(14)
+        .map(str::trim)
+        .collect();
+    let mut glazed =
+        format!("{palette}  g #ffffff30\nsprite glazed 14x14 palette=p\n  layer base\n");
+    for row in &rows {
+        glazed += &format!("    {row}\n");
+    }
+    glazed += "  layer glaze\n";
+    for row in &rows {
+        let glaze: String = row
+            .chars()
+            .map(|c| if c == '.' { '.' } else { 'g' })
+            .collect();
+        glazed += &format!("    {glaze}\n");
+    }
+    let found = reported(&glazed, &keys);
+    assert!(
+        found.contains(&(LintCode::PillowShading, "glazed".to_owned())),
+        "{found:?}"
+    );
+    // The limit for any sprite holds for small ones too.
+    let capped = LintOptions {
+        max_colors_small: 16,
+        max_colors: 8,
+        ..keys.clone()
+    };
+    let rainbow = format!("{palette}sprite rainbow 3x3 palette=p\n  123\n  456\n  789\n");
+    assert_eq!(
+        reported(&rainbow, &capped),
+        [(LintCode::TooManyColors, "rainbow".to_owned())]
+    );
+}
+
 const SWAPS: &str = "\
 palette base
   .  transparent
@@ -452,12 +593,12 @@ fn lint_errors() {
     );
     let message = &check("lint allow nope\n", &Limits::default())[0].message;
     assert!(
-        message.starts_with(
-            "Unknown lint `nope`; expected one of orphan_pixel, jaggy, double_outline, \
-             stray_alpha, unused_key"
-        ),
+        message.starts_with("Unknown lint `nope`; expected one of orphan_pixel, "),
         "{message}"
     );
+    for code in LintCode::ALL {
+        assert!(message.contains(code.as_str()), "{message}");
+    }
     assert_eq!(errors("lint\n"), [(1, 5, Syntax)]);
     assert_eq!(errors("lint deny unused_key\n"), [(1, 6, Syntax)]);
     assert_eq!(errors("lint allow\n"), [(1, 11, Syntax)]);

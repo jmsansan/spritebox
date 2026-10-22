@@ -1,6 +1,7 @@
 //! Lint: warnings for art that is valid but does not follow pixel-art practice.
 
 mod lines;
+mod shading;
 
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap, HashSet};
@@ -26,17 +27,31 @@ pub enum LintCode {
     DoubleOutline,
     /// A lone translucent pixel in an otherwise opaque sprite: a leftover of smoothing.
     StrayAlpha,
+    /// Shading that darkens toward the edges on every side, with no direction of
+    /// light.
+    PillowShading,
+    /// A line of a shade one pixel thick between a lighter and a darker one: shading
+    /// stacked in parallel lines.
+    Banding,
+    /// A sprite drawn at 2×, 3× or 4× among sprites drawn at 1×.
+    Mixel,
+    /// More colors than a sprite of its size reads well with.
+    TooManyColors,
     /// A palette key that nothing uses.
     UnusedKey,
 }
 
 impl LintCode {
     /// Every code, in order.
-    pub const ALL: [LintCode; 5] = [
+    pub const ALL: [LintCode; 9] = [
         LintCode::OrphanPixel,
         LintCode::Jaggy,
         LintCode::DoubleOutline,
         LintCode::StrayAlpha,
+        LintCode::PillowShading,
+        LintCode::Banding,
+        LintCode::Mixel,
+        LintCode::TooManyColors,
         LintCode::UnusedKey,
     ];
 
@@ -47,6 +62,10 @@ impl LintCode {
             LintCode::Jaggy => "jaggy",
             LintCode::DoubleOutline => "double_outline",
             LintCode::StrayAlpha => "stray_alpha",
+            LintCode::PillowShading => "pillow_shading",
+            LintCode::Banding => "banding",
+            LintCode::Mixel => "mixel",
+            LintCode::TooManyColors => "too_many_colors",
             LintCode::UnusedKey => "unused_key",
         }
     }
@@ -149,6 +168,15 @@ pub struct LintOptions {
     /// color around it for `orphan_pixel` to report it. A lone pixel that stands out
     /// more, such as an eye or a glint, is taken as deliberate. Default 32.
     pub orphan_contrast: u8,
+    /// How near, in percent of the sprite's shorter side, the light must sit to the
+    /// middle of the fill for `pillow_shading`. Default 10.
+    pub pillow_offset: u32,
+    /// The shortest line of one shade that `banding` reports, in pixels. Default 4.
+    pub banding_length: usize,
+    /// The most colors for `too_many_colors` in a sprite under 32×32. Default 8.
+    pub max_colors_small: usize,
+    /// The most colors for `too_many_colors` in any sprite. Default 16.
+    pub max_colors: usize,
 }
 
 impl Default for LintOptions {
@@ -156,6 +184,10 @@ impl Default for LintOptions {
         Self {
             allow: Vec::new(),
             orphan_contrast: 32,
+            pillow_offset: 10,
+            banding_length: 4,
+            max_colors_small: 8,
+            max_colors: 16,
         }
     }
 }
@@ -397,14 +429,25 @@ pub(crate) fn run(document: &Document, options: &LintOptions, limits: &Limits) -
     let sources = &document.sources;
     let mut sink = Sink::new(sources, options, limits.max_warnings);
     let index = sources.index();
+    // Each drawn sprite's pixel scale, for `mixel`.
+    let mut scales = Vec::new();
     for sprite in &document.sprites {
         let Some(def) = index.get(&(Kind::Sprite, sprite.name.as_str())) else {
             continue;
         };
         if let Detail::Drawn(layers) = &def.detail {
-            lines::check(sprite, def, layers, options, &mut sink);
+            let canvas = lines::Canvas::new(sprite);
+            let report = lines::Report {
+                sprite,
+                def,
+                layers,
+            };
+            lines::check(&canvas, &report, options, &mut sink);
+            shading::check(&canvas, &report, options, &mut sink);
+            scales.push((shading::scale(&canvas), report));
         }
     }
+    shading::mixels(&scales, &mut sink);
     unused_keys(document, &index, &mut sink);
     sink.finish()
 }

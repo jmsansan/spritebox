@@ -778,10 +778,15 @@ fn review(text: &str) -> spritebox::Result<()> {
 | `jaggy` | Uneven steps along a sprite's silhouette: a step at least two pixels longer, or shorter, than the steps on both sides of it, as in `1, 1, 3, 1, 1`. Steady lines (`2, 2, 2`), alternating ones (`2, 1, 2, 1`) and curves (`1, 2, 3`) are clean, and so are the first and last steps of a stretch, which corners cut short. Steep sides are measured down the rows. |
 | `double_outline` | An outline two pixels thick at an L corner, where one diagonal step would do. The outline is the key of at least half the silhouette's pixels, around a fill; square corners, lines meeting lines, lines that fill 2×2 squares (two pixels thick across), and strokes with no fill beside them are taken as deliberate. Each corner is taken out in turn, so what is reported is what to erase. |
 | `stray_alpha` | A lone translucent pixel, with no translucent pixel around it, in a sprite whose translucent pixels are fewer than one in eight: a leftover of smoothing, which blurs when the sprite is scaled. Translucent areas, such as glass, are left alone. |
+| `pillow_shading` | A fill (the pixels inside the outline) that darkens toward its edge on every side, with no direction of light: the centroid of its lighter half within `LintOptions::pillow_offset` (default 10%) of the shorter side from the fill's centroid (at 0%, exactly on it), and lightness rising with the distance from the edge. In sprites of at least 8×8 with three colors in the fill; not in panels, whose bevels are shaded so on purpose. |
+| `banding` | A line one pixel thick, reaching at least `LintOptions::banding_length` (default 4) pixels across or down, of a shade between a lighter and a darker one on its two sides: shading stacked in parallel lines. The outline is not a shade. |
+| `mixel` | A sprite drawn at 2×, 3× or 4× (every run of one color, across and down, a multiple of it) in a document with sprites drawn at 1×. A document drawn at 2× throughout is consistent. |
+| `too_many_colors` | More visible colors than `LintOptions::max_colors_small` (default 8) in a sprite under 32×32, or than `LintOptions::max_colors` (default 16) in any. |
 | `unused_key` | A palette key that no sprite, frame, tile or texture ramp uses, through that palette or one copied from it. |
 
-The checks of pixels (`orphan_pixel` to `stray_alpha`) look at sprites drawn with a size,
-of at least 3×3, as they are seen with their layers. Textures, whose noise is the
+The checks of pixels (`orphan_pixel` to `too_many_colors`) look at sprites drawn with a
+size, as they are seen with their layers; those of lines need at least 3×3.
+Lightness is OKLab's L, computed in fixed point so that every platform agrees. Textures, whose noise is the
 point, derived sprites, which repeat their base, and font glyphs, whose dots and
 letterforms break these rules on purpose, are not checked.
 

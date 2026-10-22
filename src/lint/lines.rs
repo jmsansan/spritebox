@@ -6,14 +6,21 @@ use crate::{Color, Image, Sprite};
 
 /// A sprite's rendered pixels, read with fully transparent pixels as one color and
 /// beyond the edges as transparent.
-struct Canvas {
+pub(super) struct Canvas {
     image: Image,
-    w: i64,
-    h: i64,
+    pub w: i64,
+    pub h: i64,
 }
 
 impl Canvas {
-    fn at(&self, x: i64, y: i64) -> Color {
+    pub fn new(sprite: &Sprite) -> Canvas {
+        Canvas {
+            image: sprite.render(),
+            w: sprite.width as i64,
+            h: sprite.height as i64,
+        }
+    }
+    pub fn at(&self, x: i64, y: i64) -> Color {
         if x < 0 || y < 0 || x >= self.w || y >= self.h {
             return Color::TRANSPARENT;
         }
@@ -23,13 +30,46 @@ impl Canvas {
             .unwrap_or(Color::TRANSPARENT);
         if c.a == 0 { Color::TRANSPARENT } else { c }
     }
-    fn visible(&self, x: i64, y: i64) -> bool {
+    pub fn visible(&self, x: i64, y: i64) -> bool {
         self.at(x, y).a > 0
+    }
+    /// Whether some pixel is transparent: a sprite without one, such as a tile, has
+    /// no silhouette.
+    pub fn has_silhouette(&self) -> bool {
+        (0..self.h).any(|y| (0..self.w).any(|x| !self.visible(x, y)))
+    }
+    /// Whether `(x, y)` is visible and touches a transparent pixel or the edge.
+    pub fn on_silhouette(&self, x: i64, y: i64) -> bool {
+        self.visible(x, y)
+            && [(-1, 0), (1, 0), (0, -1), (0, 1)]
+                .iter()
+                .any(|&(dx, dy)| !self.visible(x + dx, y + dy))
+    }
+    /// The outline's color: the color, as seen, of at least half the silhouette's
+    /// pixels, if any.
+    pub fn outline_color(&self) -> Option<Color> {
+        if !self.has_silhouette() {
+            return None;
+        }
+        let mut counts: std::collections::HashMap<[u8; 4], usize> = Default::default();
+        let mut total = 0;
+        for y in 0..self.h {
+            for x in 0..self.w {
+                if self.on_silhouette(x, y) {
+                    total += 1;
+                    *counts.entry(self.at(x, y).to_array()).or_default() += 1;
+                }
+            }
+        }
+        let (&outline, &n) = counts
+            .iter()
+            .max_by_key(|&(c, n)| (*n, std::cmp::Reverse(*c)))?;
+        (n * 2 >= total).then(|| Color::rgba(outline[0], outline[1], outline[2], outline[3]))
     }
 }
 
 /// The 8 neighbours of a pixel, as offsets.
-const AROUND: [(i64, i64); 8] = [
+pub(super) const AROUND: [(i64, i64); 8] = [
     (-1, -1),
     (0, -1),
     (1, -1),
@@ -41,50 +81,37 @@ const AROUND: [(i64, i64); 8] = [
 ];
 
 /// Runs the line-work checks on a sprite drawn with rows, of at least 3×3.
-pub(super) fn check(
-    sprite: &Sprite,
-    def: &Def,
-    layers: &[DrawnLayer],
-    options: &LintOptions,
-    sink: &mut Sink,
-) {
-    if sprite.width < 3 || sprite.height < 3 {
+pub(super) fn check(canvas: &Canvas, report: &Report, options: &LintOptions, sink: &mut Sink) {
+    if canvas.w < 3 || canvas.h < 3 {
         return;
     }
-    let canvas = Canvas {
-        image: sprite.render(),
-        w: sprite.width as i64,
-        h: sprite.height as i64,
-    };
-    let report = Report {
-        sprite,
-        def,
-        layers,
-    };
-    orphan_pixels(&canvas, &report, options, sink);
-    jaggies(&canvas, &report, sink);
-    double_outlines(&canvas, &report, sink);
-    stray_alpha(&canvas, &report, sink);
+    orphan_pixels(canvas, report, options, sink);
+    jaggies(canvas, report, sink);
+    double_outlines(canvas, report, sink);
+    stray_alpha(canvas, report, sink);
 }
 
 /// What a warning about a sprite's pixels needs.
-struct Report<'r> {
-    sprite: &'r Sprite,
-    def: &'r Def,
-    layers: &'r [DrawnLayer],
+pub(super) struct Report<'r> {
+    pub sprite: &'r Sprite,
+    pub def: &'r Def,
+    pub layers: &'r [DrawnLayer],
 }
 
 impl Report<'_> {
-    /// Reports `pixels`, at the character of the first.
-    fn push(
+    /// Reports `pixels`, at the character of the first; with no pixels, at the
+    /// sprite's name.
+    pub fn push(
         &self,
         sink: &mut Sink,
         code: LintCode,
         pixels: Vec<(u32, u32)>,
         message: impl FnOnce() -> String,
     ) {
-        let (x, y) = pixels[0];
-        let position = pixel_position(self.sprite, self.layers, x, y).unwrap_or(self.def.pos);
+        let position = pixels
+            .first()
+            .and_then(|&(x, y)| pixel_position(self.sprite, self.layers, x, y))
+            .unwrap_or(self.def.pos);
         let found = Found {
             code,
             kind: Kind::Sprite,
@@ -276,46 +303,16 @@ fn double_outlines(canvas: &Canvas, report: &Report, sink: &mut Sink) {
     let (w, h) = (canvas.w, canvas.h);
     let inside = |x: i64, y: i64| x >= 0 && y >= 0 && x < w && y < h;
     let index = |x: i64, y: i64| (y * w + x) as usize;
-    // A sprite with no transparent pixel, such as a tile, has no silhouette.
-    if (0..h).all(|y| (0..w).all(|x| canvas.visible(x, y))) {
-        return;
-    }
-    let edge = |x: i64, y: i64| {
-        canvas.visible(x, y)
-            && [(-1, 0), (1, 0), (0, -1), (0, 1)]
-                .iter()
-                .any(|&(dx, dy)| !canvas.visible(x + dx, y + dy))
-    };
-    let key = |x: i64, y: i64| sprite.key(x as u32, y as u32);
-    let mut counts: Vec<(char, usize)> = Vec::new();
-    let mut total = 0;
-    for y in 0..h {
-        for x in 0..w {
-            if !edge(x, y) {
-                continue;
-            }
-            total += 1;
-            let Some(k) = key(x, y) else { continue };
-            match counts.iter_mut().find(|(c, _)| *c == k) {
-                Some((_, n)) => *n += 1,
-                None => counts.push((k, 1)),
-            }
-        }
-    }
-    let Some(&(outline, n)) = counts
-        .iter()
-        .max_by_key(|&&(k, n)| (n, std::cmp::Reverse(k)))
-    else {
+    let Some(outline) = canvas.outline_color() else {
         return;
     };
-    if n * 2 < total {
-        return;
-    }
+    let edge = |x: i64, y: i64| canvas.on_silhouette(x, y);
+    let outlined = |x: i64, y: i64| canvas.visible(x, y) && canvas.at(x, y) == outline;
     // The outline's pixels: those of its key that connect to its pixels on the edge.
     let mut mask = vec![false; (w * h) as usize];
     let mut stack: Vec<(i64, i64)> = (0..h)
         .flat_map(|y| (0..w).map(move |x| (x, y)))
-        .filter(|&(x, y)| edge(x, y) && key(x, y) == Some(outline))
+        .filter(|&(x, y)| edge(x, y) && outlined(x, y))
         .collect();
     while let Some((x, y)) = stack.pop() {
         if mask[index(x, y)] {
@@ -324,10 +321,7 @@ fn double_outlines(canvas: &Canvas, report: &Report, sink: &mut Sink) {
         mask[index(x, y)] = true;
         for (dx, dy) in AROUND {
             let (nx, ny) = (x + dx, y + dy);
-            if inside(nx, ny)
-                && !mask[index(nx, ny)]
-                && canvas.visible(nx, ny)
-                && key(nx, ny) == Some(outline)
+            if inside(nx, ny) && !mask[index(nx, ny)] && canvas.visible(nx, ny) && outlined(nx, ny)
             {
                 stack.push((nx, ny));
             }
@@ -368,7 +362,7 @@ fn double_outlines(canvas: &Canvas, report: &Report, sink: &mut Sink) {
             let fill = (-2..=2).any(|dy: i64| {
                 (-2..=2).any(|dx: i64| {
                     let (nx, ny) = (x + dx, y + dy);
-                    canvas.visible(nx, ny) && key(nx, ny) != Some(outline)
+                    canvas.visible(nx, ny) && !outlined(nx, ny)
                 })
             });
             if square || !fill || !connected(&neighbours) {

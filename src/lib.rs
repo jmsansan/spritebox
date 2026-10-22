@@ -197,6 +197,7 @@ mod json;
 mod label;
 mod limits;
 mod lint;
+mod oklab;
 pub mod png;
 mod preview;
 mod sprite;

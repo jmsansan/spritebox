@@ -14,6 +14,9 @@
 - Lint checks for line work (#22): `jaggy` (uneven steps along a silhouette),
   `double_outline` (outlines two pixels thick at L corners) and `stray_alpha` (lone
   translucent pixels left from smoothing).
+- Lint checks for shading and scale (#23): `pillow_shading`, `banding`, `mixel`
+  (sprites drawn at 2×–4× among 1× art) and `too_many_colors`, with their
+  thresholds in `LintOptions`. Lightness is OKLab's, in fixed point.
 - The command-line tool's JSON diagnostics have a `severity`, `error` or `warning`.
 
 ### Changed
