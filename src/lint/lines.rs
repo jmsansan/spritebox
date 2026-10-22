@@ -160,7 +160,8 @@ struct Run {
 /// and last steps of a stretch, which corners cut short, are not judged.
 fn jaggies(canvas: &Canvas, report: &Report, sink: &mut Sink) {
     let name = &report.sprite.name;
-    let mut reported: std::collections::HashSet<Vec<(u32, u32)>> = Default::default();
+    // Pixels of the steps reported so far.
+    let mut reported: std::collections::HashSet<(u32, u32)> = Default::default();
     // Each side: the first visible pixel of each column from the top or the bottom, or
     // of each row from the left or the right.
     for side in 0..4 {
@@ -243,10 +244,12 @@ fn jaggies(canvas: &Canvas, report: &Report, sink: &mut Sink) {
                 let pixels: Vec<(u32, u32)> = (run.start..run.start + run.len)
                     .map(|i| pixel(i, run.value))
                     .collect();
-                // A stroke one pixel thin shows a step from both sides; one warning a step.
-                if !reported.insert(pixels.clone()) {
+                // A stroke one pixel thin shows a step from both sides, the same pixels or
+                // some of them; one warning a step.
+                if pixels.iter().any(|p| reported.contains(p)) {
                     continue;
                 }
+                reported.extend(pixels.iter().copied());
                 let (x, y) = pixels[0];
                 let steps = &steps;
                 report.push(sink, LintCode::Jaggy, pixels, || {

@@ -170,6 +170,35 @@ fn slope(steps: &[usize]) -> String {
     text
 }
 
+/// A stroke one pixel thin that climbs from the bottom left in steps of `steps`
+/// pixels, with `extra` pixels added.
+fn stroke(steps: &[usize], extra: &[(usize, usize)]) -> String {
+    let width: usize = steps.iter().sum();
+    let mut rows: Vec<Vec<char>> = (0..steps.len())
+        .map(|y| {
+            let run = steps.len() - 1 - y;
+            let start: usize = steps[..run].iter().sum();
+            (0..width)
+                .map(|x| {
+                    if x >= start && x < start + steps[run] {
+                        'o'
+                    } else {
+                        '.'
+                    }
+                })
+                .collect()
+        })
+        .collect();
+    for &(x, y) in extra {
+        rows[y][x] = 'o';
+    }
+    let mut text = format!("sprite s {width}x{} palette=p\n", steps.len());
+    for row in &rows {
+        text += &format!("  {}\n", row.iter().collect::<String>());
+    }
+    text
+}
+
 #[test]
 fn jaggies() {
     // A step of 3 among steps of 1, reported at its pixels; the sprite starts on line
@@ -222,53 +251,27 @@ fn jaggies() {
         assert_eq!(found[0].2.len(), 3, "{tops:?}");
     }
     // A stroke one pixel thin is reported once, not from above and below.
-    let steps = [1, 1, 1, 3, 1, 5];
-    let mut stroke = String::from("sprite s 12x6 palette=p\n");
-    for y in 0..6 {
-        let start: usize = steps[..5 - y].iter().sum();
-        let row: String = (0..12)
-            .map(|x| {
-                if x >= start && x < start + steps[5 - y] {
-                    'o'
-                } else {
-                    '.'
-                }
-            })
-            .collect();
-        stroke += &format!("  {row}\n");
-    }
-    assert_eq!(line_work(&stroke, LintCode::Jaggy).len(), 1);
+    assert_eq!(
+        line_work(&stroke(&[1, 1, 1, 3, 1, 5], &[]), LintCode::Jaggy).len(),
+        1
+    );
     // One warning for each uneven step, however the sides see it: a stroke with two,
     // thickened where one side's stretch ends and the other's goes on.
-    let steps = [1, 1, 1, 3, 1, 1, 1, 3, 1, 1, 1];
-    let width: usize = steps.iter().sum();
-    let mut rows: Vec<Vec<char>> = Vec::new();
-    for y in 0..steps.len() {
-        let run = steps.len() - 1 - y;
-        let start: usize = steps[..run].iter().sum();
-        rows.push(
-            (0..width)
-                .map(|x| {
-                    if x >= start && x < start + steps[run] {
-                        'o'
-                    } else {
-                        '.'
-                    }
-                })
-                .collect(),
-        );
-    }
-    rows[4][10] = 'o';
-    let mut text = format!("sprite s {width}x{} palette=p\n", steps.len());
-    for row in &rows {
-        text += &format!("  {}\n", row.iter().collect::<String>());
-    }
-    let found = line_work(&text, LintCode::Jaggy);
+    let found = line_work(
+        &stroke(&[1, 1, 1, 3, 1, 1, 1, 3, 1, 1, 1], &[(10, 4)]),
+        LintCode::Jaggy,
+    );
     let mut pixels: Vec<(u32, u32)> = found.iter().flat_map(|(_, _, p)| p.clone()).collect();
     let all = pixels.len();
     pixels.sort();
     pixels.dedup();
     assert_eq!((found.len(), pixels.len()), (2, all), "{found:?}");
+    // Also when the sides see overlapping parts of a step: a stroke thickened at one
+    // end of its long step.
+    assert_eq!(
+        line_work(&stroke(&[1, 1, 1, 5, 1, 1, 1], &[(7, 2)]), LintCode::Jaggy).len(),
+        1
+    );
     // Steep sides are measured down the rows: the same slope turned on its side, and
     // drawn so.
     let flat: Document = format!(
