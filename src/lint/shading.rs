@@ -1,7 +1,7 @@
 //! Shading and scale: pillow shading, banding, mixed pixel sizes and too many colors,
 //! in the sprites drawn with rows.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 
 use super::lines::{AROUND, Canvas, Report};
 use super::{LintCode, LintOptions, Sink};
@@ -11,13 +11,39 @@ use crate::oklab::Lab;
 /// Runs the shading checks on a sprite drawn with rows.
 pub(super) fn check(canvas: &Canvas, report: &Report, options: &LintOptions, sink: &mut Sink) {
     too_many_colors(canvas, report, options, sink);
-    pillow_shading(canvas, report, options, sink);
-    banding(canvas, report, options, sink);
+    let light = Light::new(canvas);
+    pillow_shading(canvas, &light, report, options, sink);
+    banding(canvas, &light, report, options, sink);
 }
 
-/// The lightness of a color, 0 to 10000.
-fn lightness(c: Color) -> i64 {
-    Lab::from_color(c).l as i64
+/// The lightness of each pixel, 0 to 10000, worked out once for each color.
+struct Light {
+    values: Vec<i64>,
+    w: i64,
+}
+
+impl Light {
+    fn new(canvas: &Canvas) -> Light {
+        let mut known: HashMap<[u8; 4], i64> = HashMap::new();
+        let mut values = Vec::with_capacity((canvas.w * canvas.h) as usize);
+        for y in 0..canvas.h {
+            for x in 0..canvas.w {
+                let c = canvas.at(x, y);
+                let l = *known
+                    .entry(c.to_array())
+                    .or_insert_with(|| Lab::from_color(c).l as i64);
+                values.push(l);
+            }
+        }
+        Light {
+            values,
+            w: canvas.w,
+        }
+    }
+    /// The lightness at `(x, y)`, which is inside the sprite.
+    fn at(&self, x: i64, y: i64) -> i64 {
+        self.values[(y * self.w + x) as usize]
+    }
 }
 
 /// `too_many_colors`: more visible colors than `max_colors_small` in a sprite under
@@ -60,20 +86,26 @@ fn too_many_colors(canvas: &Canvas, report: &Report, options: &LintOptions, sink
 /// is within `pillow_offset` percent of the shorter side from the centroid of the
 /// whole fill, and lightness rises with the distance from the edge. Only in sprites
 /// of at least 8×8, with a silhouette, three colors in the fill, and not panels.
-fn pillow_shading(canvas: &Canvas, report: &Report, options: &LintOptions, sink: &mut Sink) {
+fn pillow_shading(
+    canvas: &Canvas,
+    light: &Light,
+    report: &Report,
+    options: &LintOptions,
+    sink: &mut Sink,
+) {
     let sprite = report.sprite;
     let (w, h) = (canvas.w, canvas.h);
     if w < 8 || h < 8 || sprite.slice.is_some() || !canvas.has_silhouette() {
         return;
     }
-    let outline = canvas.outline_key(sprite);
+    let outline = canvas.outline_color();
     let fill = |x: i64, y: i64| {
         x >= 0
             && y >= 0
             && x < w
             && y < h
             && canvas.visible(x, y)
-            && sprite.key(x as u32, y as u32) != outline
+            && Some(canvas.at(x, y)) != outline
     };
     // Distance from the edge of the fill, in steps across or down.
     let index = |x: i64, y: i64| (y * w + x) as usize;
@@ -110,10 +142,11 @@ fn pillow_shading(canvas: &Canvas, report: &Report, options: &LintOptions, sink:
         for x in 0..w {
             if fill(x, y) {
                 let c = canvas.at(x, y);
-                if !colors.contains(&c) {
+                // Only whether there are three colors matters.
+                if colors.len() < 3 && !colors.contains(&c) {
                     colors.push(c);
                 }
-                pixels.push((x, y, lightness(c), distance[index(x, y)] as i64));
+                pixels.push((x, y, light.at(x, y), distance[index(x, y)] as i64));
             }
         }
     }
@@ -190,16 +223,19 @@ fn centred(pixels: &[(i64, i64, i64, i64)], side: i64, offset: u32) -> bool {
 /// `banding`: a line one pixel thick, at least `banding_length` pixels long, of a
 /// color between the colors on its two sides in lightness: shades stacked in
 /// parallel lines rather than shaped. The outline is not a shade, on either side.
-fn banding(canvas: &Canvas, report: &Report, options: &LintOptions, sink: &mut Sink) {
+fn banding(
+    canvas: &Canvas,
+    light: &Light,
+    report: &Report,
+    options: &LintOptions,
+    sink: &mut Sink,
+) {
     let (w, h) = (canvas.w, canvas.h);
     let index = |x: i64, y: i64| (y * w + x) as usize;
-    let outline = canvas.outline_key(report.sprite);
+    let outline = canvas.outline_color();
     let shade = |x: i64, y: i64| {
-        let inside = x >= 0 && y >= 0 && x < w && y < h;
         let c = canvas.at(x, y);
-        let outlined =
-            inside && outline.is_some() && report.sprite.key(x as u32, y as u32) == outline;
-        (c.a > 0 && !outlined).then_some(c)
+        (c.a > 0 && Some(c) != outline).then_some(c)
     };
     // Whether a pixel is a step of a ramp across or down: between two other shades,
     // one lighter and one darker.
@@ -207,7 +243,7 @@ fn banding(canvas: &Canvas, report: &Report, options: &LintOptions, sink: &mut S
         let Some(c) = shade(x, y) else {
             return false;
         };
-        let l = lightness(c);
+        let l = light.at(x, y);
         [((-1, 0), (1, 0)), ((0, -1), (0, 1))]
             .iter()
             .any(|&((ax, ay), (bx, by))| {
@@ -217,7 +253,8 @@ fn banding(canvas: &Canvas, report: &Report, options: &LintOptions, sink: &mut S
                 if a == c || b == c || a == b {
                     return false;
                 }
-                let (la, lb) = (lightness(a), lightness(b));
+                // Both are shades, so inside the sprite.
+                let (la, lb) = (light.at(x + ax, y + ay), light.at(x + bx, y + by));
                 (la < l && l < lb) || (la > l && l > lb)
             })
     };

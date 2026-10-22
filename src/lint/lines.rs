@@ -45,32 +45,26 @@ impl Canvas {
                 .iter()
                 .any(|&(dx, dy)| !self.visible(x + dx, y + dy))
     }
-    /// The outline's key: the key of at least half the silhouette's pixels, if any.
-    pub fn outline_key(&self, sprite: &Sprite) -> Option<char> {
+    /// The outline's color: the color, as seen, of at least half the silhouette's
+    /// pixels, if any.
+    pub fn outline_color(&self) -> Option<Color> {
         if !self.has_silhouette() {
             return None;
         }
-        let mut counts: Vec<(char, usize)> = Vec::new();
+        let mut counts: std::collections::HashMap<[u8; 4], usize> = Default::default();
         let mut total = 0;
         for y in 0..self.h {
             for x in 0..self.w {
-                if !self.on_silhouette(x, y) {
-                    continue;
-                }
-                total += 1;
-                let Some(k) = sprite.key(x as u32, y as u32) else {
-                    continue;
-                };
-                match counts.iter_mut().find(|(c, _)| *c == k) {
-                    Some((_, n)) => *n += 1,
-                    None => counts.push((k, 1)),
+                if self.on_silhouette(x, y) {
+                    total += 1;
+                    *counts.entry(self.at(x, y).to_array()).or_default() += 1;
                 }
             }
         }
-        let &(outline, n) = counts
+        let (&outline, &n) = counts
             .iter()
-            .max_by_key(|&&(k, n)| (n, std::cmp::Reverse(k)))?;
-        (n * 2 >= total).then_some(outline)
+            .max_by_key(|&(c, n)| (*n, std::cmp::Reverse(*c)))?;
+        (n * 2 >= total).then(|| Color::rgba(outline[0], outline[1], outline[2], outline[3]))
     }
 }
 
@@ -309,16 +303,16 @@ fn double_outlines(canvas: &Canvas, report: &Report, sink: &mut Sink) {
     let (w, h) = (canvas.w, canvas.h);
     let inside = |x: i64, y: i64| x >= 0 && y >= 0 && x < w && y < h;
     let index = |x: i64, y: i64| (y * w + x) as usize;
-    let Some(outline) = canvas.outline_key(sprite) else {
+    let Some(outline) = canvas.outline_color() else {
         return;
     };
     let edge = |x: i64, y: i64| canvas.on_silhouette(x, y);
-    let key = |x: i64, y: i64| sprite.key(x as u32, y as u32);
+    let outlined = |x: i64, y: i64| canvas.visible(x, y) && canvas.at(x, y) == outline;
     // The outline's pixels: those of its key that connect to its pixels on the edge.
     let mut mask = vec![false; (w * h) as usize];
     let mut stack: Vec<(i64, i64)> = (0..h)
         .flat_map(|y| (0..w).map(move |x| (x, y)))
-        .filter(|&(x, y)| edge(x, y) && key(x, y) == Some(outline))
+        .filter(|&(x, y)| edge(x, y) && outlined(x, y))
         .collect();
     while let Some((x, y)) = stack.pop() {
         if mask[index(x, y)] {
@@ -327,10 +321,7 @@ fn double_outlines(canvas: &Canvas, report: &Report, sink: &mut Sink) {
         mask[index(x, y)] = true;
         for (dx, dy) in AROUND {
             let (nx, ny) = (x + dx, y + dy);
-            if inside(nx, ny)
-                && !mask[index(nx, ny)]
-                && canvas.visible(nx, ny)
-                && key(nx, ny) == Some(outline)
+            if inside(nx, ny) && !mask[index(nx, ny)] && canvas.visible(nx, ny) && outlined(nx, ny)
             {
                 stack.push((nx, ny));
             }
@@ -371,7 +362,7 @@ fn double_outlines(canvas: &Canvas, report: &Report, sink: &mut Sink) {
             let fill = (-2..=2).any(|dy: i64| {
                 (-2..=2).any(|dx: i64| {
                     let (nx, ny) = (x + dx, y + dy);
-                    canvas.visible(nx, ny) && key(nx, ny) != Some(outline)
+                    canvas.visible(nx, ny) && !outlined(nx, ny)
                 })
             });
             if square || !fill || !connected(&neighbours) {

@@ -431,6 +431,34 @@ fn shading_and_scale() {
         found.contains(&(LintCode::PillowShading, "square".to_owned())),
         "{found:?}"
     );
+    // What counts is the color seen: a translucent glaze over the outline and the
+    // fill does not hide the pillow under it.
+    let rows: Vec<&str> = SHADING
+        .split("sprite pillow 14x14 palette=p\n")
+        .nth(1)
+        .unwrap()
+        .lines()
+        .take(14)
+        .map(str::trim)
+        .collect();
+    let mut glazed =
+        format!("{palette}  g #ffffff30\nsprite glazed 14x14 palette=p\n  layer base\n");
+    for row in &rows {
+        glazed += &format!("    {row}\n");
+    }
+    glazed += "  layer glaze\n";
+    for row in &rows {
+        let glaze: String = row
+            .chars()
+            .map(|c| if c == '.' { '.' } else { 'g' })
+            .collect();
+        glazed += &format!("    {glaze}\n");
+    }
+    let found = reported(&glazed, &keys);
+    assert!(
+        found.contains(&(LintCode::PillowShading, "glazed".to_owned())),
+        "{found:?}"
+    );
     // The limit for any sprite holds for small ones too.
     let capped = LintOptions {
         max_colors_small: 16,
