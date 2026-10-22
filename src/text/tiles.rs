@@ -69,6 +69,11 @@ impl<'a> Parser<'a, '_> {
         self.tilesets
             .iter()
             .map(|t| {
+                // The sprite a source starts from, if it is made from one.
+                let base = |source: &Source| match source {
+                    Source::Chain(chain) => Some(chain.base.text.to_owned()),
+                    Source::Rows(_) => None,
+                };
                 // A terrain's variants are made from its pieces, at its name.
                 let tiles = t
                     .entries
@@ -77,18 +82,23 @@ impl<'a> Parser<'a, '_> {
                         Entry::Tile { name, source } => vec![crate::lint::Member {
                             name: name.text.to_owned(),
                             pos: name.pos,
-                            source: match source {
-                                Source::Chain(chain) => Some(chain.base.text.to_owned()),
-                                Source::Rows(_) => None,
-                            },
+                            sources: base(source).into_iter().collect(),
                         }],
-                        Entry::Terrain { name, scheme, .. } => (0..scheme.variants())
-                            .map(|v| crate::lint::Member {
-                                name: format!("{}/{v}", name.text),
-                                pos: name.pos,
-                                source: None,
-                            })
-                            .collect(),
+                        Entry::Terrain {
+                            name,
+                            scheme,
+                            pieces,
+                        } => {
+                            let sources: Vec<String> =
+                                pieces.iter().filter_map(|(_, _, s)| base(s)).collect();
+                            (0..scheme.variants())
+                                .map(|v| crate::lint::Member {
+                                    name: format!("{}/{v}", name.text),
+                                    pos: name.pos,
+                                    sources: sources.clone(),
+                                })
+                                .collect()
+                        }
                     })
                     .collect();
                 (Kind::Tileset, t.name, tiles)

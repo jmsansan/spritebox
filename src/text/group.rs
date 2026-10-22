@@ -20,7 +20,8 @@ impl<'a> Parser<'a, '_> {
             .get(1)
             .ok_or_else(|| tokens[0].end_error("Expected a name for the group".to_owned()))?;
         check_name(name)?;
-        let mut members = Vec::new();
+        let mut members: Vec<Token<'a>> = Vec::new();
+        let mut seen: HashMap<&str, Position> = HashMap::new();
         let mut lint = None;
         for &token in &tokens[2..] {
             match token.text.strip_prefix("lint=") {
@@ -38,15 +39,16 @@ impl<'a> Parser<'a, '_> {
                 }
                 _ => {
                     check_name(token)?;
-                    if let Some(first) = members.iter().find(|m: &&Token| m.text == token.text) {
+                    if let Some(first) = seen.get(token.text) {
                         return Err(token.error(
                             ErrorCode::DuplicateName,
                             format!(
                                 "Sprite `{}` is in group `{}` already, at column {}",
-                                token.text, name.text, first.pos.column
+                                token.text, name.text, first.column
                             ),
                         ));
                     }
+                    seen.insert(token.text, token.pos);
                     members.push(token);
                 }
             }
@@ -114,7 +116,7 @@ impl<'a> Parser<'a, '_> {
                     .map(|m| crate::lint::Member {
                         name: m.text.to_owned(),
                         pos: m.pos,
-                        source: Some(m.text.to_owned()),
+                        sources: vec![m.text.to_owned()],
                     })
                     .collect();
                 (Kind::Group, g.name, members)

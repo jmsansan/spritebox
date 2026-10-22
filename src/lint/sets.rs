@@ -1,35 +1,74 @@
 //! Sets: sprites that belong together (an animation's frames, a group, a tileset's
 //! tiles) and should match in size, outline, palette and pixel scale.
 
+use std::collections::{HashMap, HashSet};
+
 use super::lines::Canvas;
 use super::{Detail, Found, Index, Kind, LintCode, Sink, shading};
 use crate::{Color, Document, Position, Sprite};
 
+/// What the set checks measure of a sprite: whether it has a silhouette, its
+/// outline, and its pixel scale.
+#[derive(Clone, Copy)]
+struct Measure {
+    silhouette: bool,
+    outline: Option<Color>,
+    scale: Option<i64>,
+}
+
 /// Runs the set checks on every set of the document.
 pub(super) fn check(document: &Document, index: &Index, sink: &mut Sink) {
+    // Each sprite is measured once, however many sets it is in: by tileset (for
+    // tiles) and name.
+    let mut measured: HashMap<(Option<&str>, &str), Measure> = HashMap::new();
+    let tiles: HashMap<(&str, &str), &Sprite> = document
+        .tilesets
+        .iter()
+        .flat_map(|t| {
+            t.tiles
+                .iter()
+                .map(move |s| ((t.name.as_str(), s.name.as_str()), s))
+        })
+        .collect();
     for set in &document.sources.sets {
         // Each sprite once, at the first place that names it.
         let mut members: Vec<(&Sprite, Position)> = Vec::new();
-        let mut sources: Vec<Option<&str>> = Vec::new();
+        let mut sources: Vec<&[String]> = Vec::new();
+        let mut seen: HashSet<&str> = HashSet::new();
         for member in &set.members {
-            let (name, pos) = (&member.name, &member.pos);
-            if members.iter().any(|(s, _)| s.name == *name) {
+            if !seen.insert(&member.name) {
                 continue;
             }
             let sprite = match set.kind {
-                Kind::Tileset => document
-                    .tileset(&set.name)
-                    .and_then(|t| t.tiles.iter().find(|s| s.name == *name)),
-                _ => document.sprite(name),
+                Kind::Tileset => tiles
+                    .get(&(set.name.as_str(), member.name.as_str()))
+                    .copied(),
+                _ => document.sprite(&member.name),
             };
             if let Some(sprite) = sprite {
-                members.push((sprite, *pos));
-                sources.push(member.source.as_deref());
+                members.push((sprite, member.pos));
+                sources.push(&member.sources);
             }
         }
         if members.len() < 2 {
             continue;
         }
+        let tileset = (set.kind == Kind::Tileset).then_some(set.name.as_str());
+        let measures: Vec<Measure> = members
+            .iter()
+            .map(|(s, _)| {
+                *measured
+                    .entry((tileset, s.name.as_str()))
+                    .or_insert_with(|| {
+                        let canvas = Canvas::new(s);
+                        Measure {
+                            silhouette: canvas.has_silhouette(),
+                            outline: canvas.outline_color(),
+                            scale: shading::scale(&canvas),
+                        }
+                    })
+            })
+            .collect();
         let what = match set.kind {
             Kind::Animation => "animation",
             Kind::Tileset => "tileset",
@@ -37,10 +76,11 @@ pub(super) fn check(document: &Document, index: &Index, sink: &mut Sink) {
         };
         let report = |sink: &mut Sink, code, i: usize, message: String| {
             let (sprite, pos) = members[i];
-            // The `lint=` of the sprite it is made from allows it too (not that
+            // The `lint=` of a sprite it is made from allows it too (not that
             // sprite's file's `lint allow`, which stays in that file).
             if sources[i]
-                .is_some_and(|source| sink.allowed_by_definition(code, Kind::Sprite, source))
+                .iter()
+                .any(|source| sink.allowed_by_definition(code, Kind::Sprite, source))
             {
                 return;
             }
@@ -55,7 +95,6 @@ pub(super) fn check(document: &Document, index: &Index, sink: &mut Sink) {
             sink.push(found, || message);
         };
         let set_name = &set.name;
-        let canvases: Vec<Canvas> = members.iter().map(|(s, _)| Canvas::new(s)).collect();
 
         // `inconsistent_size`: tiles are one size by definition.
         if set.kind != Kind::Tileset {
@@ -83,9 +122,9 @@ pub(super) fn check(document: &Document, index: &Index, sink: &mut Sink) {
         // `inconsistent_outline`: among sprites with a silhouette, an outline in all or
         // none; and among those drawn with one palette, the same color. A palette swap,
         // as for a flash, recolors an outline on purpose.
-        let outlines: Vec<Option<Option<Color>>> = canvases
+        let outlines: Vec<Option<Option<Color>>> = measures
             .iter()
-            .map(|c| c.has_silhouette().then(|| c.outline_color()))
+            .map(|m| m.silhouette.then_some(m.outline))
             .collect();
         let presence: Vec<Option<bool>> = outlines.iter().map(|o| o.map(|c| c.is_some())).collect();
         let (usual, odd) = minority(&presence);
@@ -158,7 +197,7 @@ pub(super) fn check(document: &Document, index: &Index, sink: &mut Sink) {
 
         // `inconsistent_scale`: the pixel scale of `mixel`, among sprites that show
         // one.
-        let scales: Vec<Option<i64>> = canvases.iter().map(shading::scale).collect();
+        let scales: Vec<Option<i64>> = measures.iter().map(|m| m.scale).collect();
         let (usual, odd) = minority(&scales);
         for i in odd {
             let name = &members[i].0.name;

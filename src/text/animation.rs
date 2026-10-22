@@ -31,7 +31,7 @@ impl<'a> Parser<'a, '_> {
                     .map(|(chain, _)| crate::lint::Member {
                         name: chain.split_flips().0.canonical(),
                         pos: chain.base.pos,
-                        source: Some(chain.base.text.to_owned()),
+                        sources: vec![chain.base.text.to_owned()],
                     })
                     .collect();
                 (Kind::Animation, a.name, frames)

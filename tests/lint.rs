@@ -767,6 +767,19 @@ fn sets_that_match() {
          h_strip = h\n    v_strip = h\n    fill = h\n"
     );
     assert_eq!(set_warnings(&terrain), [(InconsistentScale, 47, 8)]);
+    // When the variants are the odd ones, among 17 tiles at 1x, the `lint=` of the
+    // sprite their pieces are made from allows them.
+    let plain: String = (0..17).map(|i| format!("  tile p{i} = a\n")).collect();
+    let many = format!(
+        "{SETS}tileset t 4x4 palette=p\n{plain}  terrain wall 16\n    island = h\n    \
+         h_strip = h\n    v_strip = h\n    fill = h\n"
+    );
+    assert_eq!(set_warnings(&many).len(), 16);
+    let allowed_pieces = many.replace(
+        "sprite h 4x4 palette=p",
+        "sprite h 4x4 palette=p lint=allow(inconsistent_scale)",
+    );
+    assert_eq!(set_warnings(&allowed_pieces), []);
     // So does `lint allow` in its file, with no `lint=` on the set.
     for set in [
         format!("{SETS}group items a e\n"),

@@ -271,12 +271,12 @@ pub(crate) struct Set {
 }
 
 /// A sprite of a set: its name in the document, the place that names it, and the
-/// sprite it is made from, whose `lint=` reaches it.
+/// sprites it is made from, whose `lint=` reaches it.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct Member {
     pub name: String,
     pub pos: Position,
-    pub source: Option<String>,
+    pub sources: Vec<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
