@@ -366,7 +366,11 @@ fn reported(text: &str, options: &LintOptions) -> Vec<(LintCode, String)> {
 
 #[test]
 fn shading_and_scale() {
-    let found = reported(SHADING, &LintOptions::default());
+    // Git may check the fixture out with CRLF line ends, which the parser reads but
+    // the searches below do not.
+    let shading = SHADING.replace("\r\n", "\n");
+    let shading = shading.as_str();
+    let found = reported(shading, &LintOptions::default());
     let expected = [
         (LintCode::PillowShading, "pillow"),
         (LintCode::Banding, "bands"),
@@ -383,18 +387,18 @@ fn shading_and_scale() {
         max_colors_small: 9,
         ..LintOptions::default()
     };
-    let found = reported(SHADING, &lenient);
+    let found = reported(shading, &lenient);
     assert_eq!(found, [(LintCode::Mixel, "big".to_owned())]);
     // A panel's bevel is shaded so on purpose.
-    let panel = SHADING.replace(
+    let panel = shading.replace(
         "sprite pillow 14x14 palette=p",
         "sprite pillow 14x14 palette=p slice=3",
     );
     assert_eq!(reported(&panel, &LintOptions::default()).len(), 3);
     // A document drawn at 2x throughout is consistent.
-    let alone = SHADING.split("sprite pillow").next().unwrap().to_owned()
+    let alone = shading.split("sprite pillow").next().unwrap().to_owned()
         + "sprite big"
-        + SHADING
+        + shading
             .split("sprite big")
             .nth(1)
             .unwrap()
@@ -424,7 +428,7 @@ fn shading_and_scale() {
             .collect();
         square += &format!("  {row}\n");
     }
-    let palette = SHADING.split("sprite pillow").next().unwrap();
+    let palette = shading.split("sprite pillow").next().unwrap();
     let found = reported(&format!("{palette}{square}"), &keys);
     // (Its ring one pixel thick is banding too.)
     assert!(
@@ -433,7 +437,7 @@ fn shading_and_scale() {
     );
     // What counts is the color seen: a translucent glaze over the outline and the
     // fill does not hide the pillow under it.
-    let rows: Vec<&str> = SHADING
+    let rows: Vec<&str> = shading
         .split("sprite pillow 14x14 palette=p\n")
         .nth(1)
         .unwrap()
