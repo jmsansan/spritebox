@@ -352,6 +352,62 @@ fn stray_alpha() {
     assert_eq!(line_work(ghost, LintCode::StrayAlpha), []);
 }
 
+const SHADING: &str = include_str!("fixtures/lint/shading.spritebox");
+
+/// The code and sprite of each warning of `text` with `options`.
+fn reported(text: &str, options: &LintOptions) -> Vec<(LintCode, String)> {
+    let doc: Document = text.parse().unwrap();
+    doc.lint(options)
+        .warnings
+        .into_iter()
+        .map(|w| (w.code, w.sprite.unwrap_or_default()))
+        .collect()
+}
+
+#[test]
+fn shading_and_scale() {
+    let found = reported(SHADING, &LintOptions::default());
+    let expected = [
+        (LintCode::PillowShading, "pillow"),
+        (LintCode::Banding, "bands"),
+        (LintCode::Mixel, "big"),
+        (LintCode::TooManyColors, "rainbow"),
+    ];
+    let expected: Vec<(LintCode, String)> =
+        expected.iter().map(|&(c, s)| (c, s.to_owned())).collect();
+    assert_eq!(found, expected);
+    // The thresholds are options.
+    let lenient = LintOptions {
+        pillow_offset: 0,
+        banding_length: 9,
+        max_colors_small: 9,
+        ..LintOptions::default()
+    };
+    let found = reported(SHADING, &lenient);
+    assert_eq!(found, [(LintCode::Mixel, "big".to_owned())]);
+    // A panel's bevel is shaded so on purpose.
+    let panel = SHADING.replace(
+        "sprite pillow 14x14 palette=p",
+        "sprite pillow 14x14 palette=p slice=3",
+    );
+    assert_eq!(reported(&panel, &LintOptions::default()).len(), 3);
+    // A document drawn at 2x throughout is consistent.
+    let alone = SHADING.split("sprite pillow").next().unwrap().to_owned()
+        + "sprite big"
+        + SHADING
+            .split("sprite big")
+            .nth(1)
+            .unwrap()
+            .split("sprite rainbow")
+            .next()
+            .unwrap();
+    let keys = LintOptions {
+        allow: vec![LintCode::UnusedKey],
+        ..LintOptions::default()
+    };
+    assert_eq!(reported(&alone, &keys), []);
+}
+
 const SWAPS: &str = "\
 palette base
   .  transparent
@@ -452,12 +508,12 @@ fn lint_errors() {
     );
     let message = &check("lint allow nope\n", &Limits::default())[0].message;
     assert!(
-        message.starts_with(
-            "Unknown lint `nope`; expected one of orphan_pixel, jaggy, double_outline, \
-             stray_alpha, unused_key"
-        ),
+        message.starts_with("Unknown lint `nope`; expected one of orphan_pixel, "),
         "{message}"
     );
+    for code in LintCode::ALL {
+        assert!(message.contains(code.as_str()), "{message}");
+    }
     assert_eq!(errors("lint\n"), [(1, 5, Syntax)]);
     assert_eq!(errors("lint deny unused_key\n"), [(1, 6, Syntax)]);
     assert_eq!(errors("lint allow\n"), [(1, 11, Syntax)]);
