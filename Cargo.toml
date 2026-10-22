@@ -11,7 +11,7 @@ documentation = "https://docs.rs/spritebox"
 readme = "README.md"
 keywords = ["pixel-art", "sprite", "gamedev", "png", "tilemap"]
 categories = ["game-development", "multimedia::images", "graphics", "command-line-utilities"]
-include = ["/Cargo.toml", "/Cargo.lock", "/src/**", "/tests/**", "/examples/*.rs", "/examples/*.spritebox", "/README.md", "/CHANGELOG.md", "/LICENSE"]
+include = ["/Cargo.toml", "/Cargo.lock", "/src/**", "/tests/**", "/examples/*.rs", "/examples/*.spritebox", "/examples/night_shift/**", "/README.md", "/CHANGELOG.md", "/LICENSE"]
 
 [dependencies]
 
