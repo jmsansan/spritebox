@@ -383,27 +383,29 @@ impl<'s> Sink<'s> {
         }
     }
 
-    pub(super) fn push(&mut self, found: Found, message: impl FnOnce() -> String) {
-        let code = found.code;
+    /// Whether `code` is allowed for the definition: by the options or the text.
+    pub(super) fn allowed(&mut self, code: LintCode, kind: Kind, name: &str) -> bool {
         if self.options.allow.contains(&code) {
-            return;
+            return true;
         }
         let known = self
             .allowed
-            .get(&(found.kind, code))
-            .and_then(|names| names.get(found.name))
+            .get(&(kind, code))
+            .and_then(|names| names.get(name))
             .copied();
-        let allowed = known.unwrap_or_else(|| {
-            let allowed = self
-                .sources
-                .allows(&self.index, found.kind, found.name, code);
+        known.unwrap_or_else(|| {
+            let allowed = self.sources.allows(&self.index, kind, name, code);
             self.allowed
-                .entry((found.kind, code))
+                .entry((kind, code))
                 .or_default()
-                .insert(found.name.to_owned(), allowed);
+                .insert(name.to_owned(), allowed);
             allowed
-        });
-        if allowed {
+        })
+    }
+
+    pub(super) fn push(&mut self, found: Found, message: impl FnOnce() -> String) {
+        let code = found.code;
+        if self.allowed(code, found.kind, found.name) {
             return;
         }
         if let Some(i) = LintCode::ALL.iter().position(|&c| c == code) {

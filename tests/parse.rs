@@ -217,6 +217,13 @@ fn ramp_errors() {
     assert_eq!(e("  ramp r cd shift=10\n"), [(4, 19, Syntax)]);
     assert_eq!(e("  ramp r ab base=#808080\n"), [(4, 10, DuplicateName)]);
     assert_eq!(e("  ramp r cd\n    x\n"), [(5, 5, Syntax)]);
+    // A ramp longer than a palette can be is refused at once.
+    let limits = Limits {
+        max_palette_colors: 4,
+        ..Limits::default()
+    };
+    let text = "palette p\n  ramp r abcde base=#808080\n";
+    assert_eq!(errors_with(text, &limits), [(2, 10, LimitExceeded)]);
     // A key a ramp made is defined, so a line defining it again is an error.
     assert_eq!(
         e("  ramp r cd base=#808080\n  c #000000\n"),

@@ -622,6 +622,14 @@ fn palettes_and_ramps() {
         )),
         1
     );
+    // Also when the copies change it the same way: the copy that allows it does not
+    // hide it for the one that does not.
+    let alike = two
+        .replace("#202020", "#808080")
+        .replace("#242424", "#848484");
+    assert_eq!(low(&alike), 1);
+    let allowed = "palette q from=p lint=allow(low_contrast)";
+    assert_eq!(low(&alike.replace("palette q from=p", allowed)), 1);
 }
 
 const SWAPS: &str = "\

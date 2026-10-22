@@ -470,6 +470,21 @@ impl<'a> Parser<'a, '_> {
                 .first()
                 .error(ErrorCode::Syntax, "Unexpected indented line under a ramp"));
         }
+        // A ramp longer than a palette can be is refused before any work on its keys.
+        if keys
+            .text
+            .chars()
+            .nth(self.limits.max_palette_colors)
+            .is_some()
+        {
+            return Err(keys.error(
+                ErrorCode::LimitExceeded,
+                format!(
+                    "Ramp `{}` has more keys than the limit of {} a palette",
+                    name.text, self.limits.max_palette_colors
+                ),
+            ));
+        }
         let def = RampDef { name, keys };
         let written = def.keys();
         if written.len() < 2 {

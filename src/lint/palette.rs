@@ -72,12 +72,16 @@ pub(super) fn check(document: &Document, index: &Index, options: &LintOptions, s
             let Some((_, pos)) = places.into_iter().flatten().max_by_key(|p| p.1) else {
                 continue;
             };
-            if !reported.insert((
-                LintCode::NearDuplicateColor,
-                pos,
-                a.to_array(),
-                b.to_array(),
-            )) {
+            // Recorded only when not allowed here, so that it is still reported for
+            // a palette that does not allow it.
+            if sink.allowed(LintCode::NearDuplicateColor, Kind::Palette, name)
+                || !reported.insert((
+                    LintCode::NearDuplicateColor,
+                    pos,
+                    a.to_array(),
+                    b.to_array(),
+                ))
+            {
                 continue;
             }
             let d = Lab::from_color(a).distance(Lab::from_color(b));
@@ -114,6 +118,7 @@ pub(super) fn check(document: &Document, index: &Index, options: &LintOptions, s
                 let ends = (colors[0].to_array(), colors[colors.len() - 1].to_array());
                 if dot > 0
                     && dot * dot * 1_000_000 >= 992_404 * lengths
+                    && !sink.allowed(LintCode::FlatRamp, Kind::Palette, name)
                     && reported.insert((LintCode::FlatRamp, *pos, ends.0, ends.1))
                 {
                     sink.push(found(LintCode::FlatRamp, name, *pos), || {
@@ -130,6 +135,7 @@ pub(super) fn check(document: &Document, index: &Index, options: &LintOptions, s
                 let ((a, _), (b, at)) = (keys[i], keys[i + 1]);
                 let pair = (colors[i].to_array(), colors[i + 1].to_array());
                 if step >= options.min_ramp_step as i64
+                    || sink.allowed(LintCode::LowContrast, Kind::Palette, name)
                     || !reported.insert((LintCode::LowContrast, at, pair.0, pair.1))
                 {
                     continue;
