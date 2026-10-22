@@ -65,6 +65,7 @@ pub(crate) fn parse(
         allows: Vec::new(),
         file_allows: Vec::new(),
         layer_counts: HashMap::new(),
+        palette_uses: Vec::new(),
     };
     // Imported definitions take the place of their `import`.
     let mut walk = Walk {
@@ -160,6 +161,8 @@ struct Parser<'a, 'l> {
     /// For each sprite with a size that was built, by the position of its name: how
     /// many layers each of its written layers made.
     layer_counts: HashMap<Position, Vec<usize>>,
+    /// Keys that chains used from palettes they swapped away from.
+    palette_uses: chain::PaletteUses,
 }
 
 /// The words of a definition's first line after its keyword and name: positional
@@ -494,6 +497,7 @@ impl<'a> Parser<'a, '_> {
             files: files.to_vec(),
             file_allows,
             defs,
+            palette_uses: self.palette_uses.clone(),
         }
     }
 

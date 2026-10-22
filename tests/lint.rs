@@ -162,6 +162,16 @@ fn unused_keys() {
                 tileset t 1x1 palette=p\n  tile one\n    b\n\
                 texture n 4x4 palette=p\n  noise cell=4\n  ramp a c d\n";
     assert_eq!(found(text, LintCode::UnusedKey), [(6, 3)]);
+    // So do keys that a chain uses from a palette it swaps away from: `q` places the
+    // outline here, though the result is drawn with `p`.
+    let midway = "palette p\n  . transparent\n  a #ff0000\n  k #000000\n\
+                  palette q\n  . transparent\n  a #00ff00\n  k #111111\n\
+                  sprite s 3x1 palette=p\n  .a.\nsprite t = s:swap(q):outline(k):swap(p)\n";
+    assert_eq!(found(midway, LintCode::UnusedKey), []);
+    assert_eq!(
+        found(&midway.replace(":swap(q)", ""), LintCode::UnusedKey),
+        [(6, 3), (7, 3), (8, 3)]
+    );
 }
 
 #[test]

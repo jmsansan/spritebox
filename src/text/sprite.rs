@@ -455,7 +455,7 @@ impl<'a> Parser<'a, '_> {
                 return None;
             }
             let sprite = built[j].clone()?;
-            match chain.apply(&sprite, palettes, this.limits) {
+            match chain.apply(&sprite, palettes, this.limits, &mut this.palette_uses) {
                 Ok(sprite) => Some((sprite, depth)),
                 Err(e) => {
                     this.errors.push(e);

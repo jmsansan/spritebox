@@ -97,6 +97,19 @@ impl Sprite {
         Some(self.layers[layer].keys[y as usize * self.width as usize + x as usize])
     }
 
+    /// The keys that the layers use, each once, in order.
+    pub(crate) fn keys(&self) -> Vec<char> {
+        let mut keys: Vec<char> = self
+            .layers
+            .iter()
+            .flat_map(|l| l.keys.iter().copied())
+            .filter(|&k| k != EMPTY)
+            .collect();
+        keys.sort_unstable();
+        keys.dedup();
+        keys
+    }
+
     /// The index of the layer whose key [`Sprite::key`] sees at `(x, y)`.
     pub(crate) fn top_layer(&self, x: u32, y: u32) -> Option<usize> {
         if x >= self.width || y >= self.height {

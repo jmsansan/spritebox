@@ -618,13 +618,14 @@ impl<'a> Parser<'a, '_> {
                     }
                     return None;
                 };
-                let mut sprite = match chain.apply(base, palettes, self.limits) {
-                    Ok(s) => s,
-                    Err(e) => {
-                        self.errors.push(e);
-                        return None;
-                    }
-                };
+                let mut sprite =
+                    match chain.apply(base, palettes, self.limits, &mut self.palette_uses) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            self.errors.push(e);
+                            return None;
+                        }
+                    };
                 if (sprite.width, sprite.height) != (def.width, def.height) {
                     self.errors.push(chain.base.error(
                         ErrorCode::SizeMismatch,

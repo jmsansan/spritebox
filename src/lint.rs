@@ -5,7 +5,6 @@ use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::fmt;
 use std::str::FromStr;
 
-use crate::sprite::EMPTY;
 use crate::{Color, Document, Error, ErrorCode, Limits, Position, Sprite};
 
 /// Stable lint categories. Match on the code rather than the message.
@@ -163,6 +162,9 @@ pub(crate) struct Sources {
     /// The codes that `lint allow` allows in each file.
     pub file_allows: Vec<Vec<LintCode>>,
     pub defs: Vec<Def>,
+    /// Palettes and the keys that sprites used from them midway through chains, such
+    /// as `q` in `s:swap(q):outline(k):swap(p)`.
+    pub palette_uses: Vec<(String, Vec<char>)>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -526,15 +528,13 @@ fn unused_keys(document: &Document, index: &Index, sink: &mut Sink) {
         .chain(&document.frame_sprites)
         .chain(tiles)
     {
-        let mut keys: Vec<char> = sprite
-            .layers
-            .iter()
-            .flat_map(|l| l.keys.iter().copied())
-            .collect();
-        keys.sort_unstable();
-        keys.dedup();
-        for key in keys.into_iter().filter(|&k| k != EMPTY) {
+        for key in sprite.keys() {
             mark(&sprite.palette.name, key);
+        }
+    }
+    for (palette, keys) in &sources.palette_uses {
+        for &key in keys {
+            mark(palette, key);
         }
     }
     for def in &sources.defs {

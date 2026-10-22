@@ -171,7 +171,7 @@ impl<'a> Parser<'a, '_> {
                         ok = false;
                         continue;
                     };
-                    match chain.apply(base, palettes, self.limits) {
+                    match chain.apply(base, palettes, self.limits, &mut self.palette_uses) {
                         Ok(mut sprite) => {
                             sprite.name = name.clone();
                             built.push((sprite, chain.base.pos));
