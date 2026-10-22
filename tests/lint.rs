@@ -555,8 +555,8 @@ fn palettes_and_ramps() {
     );
     assert_eq!(
         messages[3],
-        "Keys `x` and `y` of ramp `grey` differ by 0.0134 in lightness, too little to tell \
-         apart"
+        "Keys `x` and `y` of ramp `grey` in palette `p` differ by 0.0134 in lightness, too \
+         little to tell apart"
     );
     // The thresholds are options; grey ramps are never flat.
     let lenient = LintOptions {
@@ -571,6 +571,39 @@ fn palettes_and_ramps() {
     let lint = doc.lint(&LintOptions::default());
     assert_eq!(lint.count(NearDuplicateColor), 1);
     assert_eq!(lint.count(UnusedKey), 1);
+    // A copy's colors count with those it inherits: `a` from `p`, `b` from `q`.
+    let copied = "palette p\n  a #ff0000\npalette q from=p\n  b #fe0000\n\
+                  sprite s 2x1 palette=q\n  ab\n";
+    let doc: Document = copied.parse().unwrap();
+    let w = &doc.lint(&LintOptions::default()).warnings;
+    let summary: Vec<_> = w
+        .iter()
+        .map(|w| (w.code, w.position.unwrap().line))
+        .collect();
+    assert_eq!(summary, [(NearDuplicateColor, 4)]);
+    // An inherited ramp is checked with the colors the copy gives it, and a problem
+    // inherited unchanged is reported once.
+    let ramps = "palette p\n  ramp r abc base=#d08159\npalette q from=p\n  a #d08159\n\
+                 sprite s 3x1 palette=p\n  abc\nsprite t 3x1 palette=q\n  abc\n";
+    let doc: Document = ramps.parse().unwrap();
+    let lint = doc.lint(&LintOptions::default());
+    let summary: Vec<_> = lint
+        .warnings
+        .iter()
+        .map(|w| (w.code, w.position.unwrap().line, w.position.unwrap().column))
+        .collect();
+    // `a` and `b` are now one color in `q`: no step between them, at `b` in the ramp;
+    // and too close, at `q`'s `a`, the later line.
+    assert_eq!(summary, [(LowContrast, 2, 11), (NearDuplicateColor, 4, 3)]);
+    assert!(lint.warnings[0].message.contains("palette `q`"));
+    let same = "palette p\n  ramp r ab\n  a #808080\n  b #848484\npalette q from=p\n\
+                sprite s 2x1 palette=p\n  ab\nsprite t 2x1 palette=q\n  ab\n";
+    let doc: Document = same.parse().unwrap();
+    let lint = doc.lint(&LintOptions::default());
+    assert_eq!(
+        (lint.count(LowContrast), lint.count(NearDuplicateColor)),
+        (1, 1)
+    );
 }
 
 const SWAPS: &str = "\
