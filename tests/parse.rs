@@ -217,6 +217,14 @@ fn ramp_errors() {
     assert_eq!(e("  ramp r cd shift=10\n"), [(4, 19, Syntax)]);
     assert_eq!(e("  ramp r ab base=#808080\n"), [(4, 10, DuplicateName)]);
     assert_eq!(e("  ramp r cd\n    x\n"), [(5, 5, Syntax)]);
+    // A copy's ramps may not share keys with the ramps it copies, unless they replace
+    // them by name.
+    let copied = "palette p\n  ramp original ab base=#808080\npalette q from=p\n";
+    assert_eq!(
+        errors(&format!("{copied}  ramp other ba\n")),
+        [(4, 14, DuplicateName)]
+    );
+    assert_eq!(errors(&format!("{copied}  ramp original ba\n")), []);
     // A ramp longer than a palette can be is refused at once.
     let limits = Limits {
         max_palette_colors: 4,

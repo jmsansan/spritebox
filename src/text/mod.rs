@@ -842,9 +842,30 @@ impl<'a> Parser<'a, '_> {
                         None => colors.push((key, color)),
                     }
                 }
-                // A ramp of the palette copied is replaced by one of the same name.
+                // A ramp of the palette copied is replaced by one of the same name;
+                // the others keep their keys, which no ramp written here may share.
+                let replaced: Vec<&str> = def.ramps.iter().map(|r| r.name.text).collect();
                 for ramp in &def.ramps {
                     let keys = ramp.keys();
+                    let shared = keys.iter().find_map(|&(key, pos)| {
+                        ramps
+                            .iter()
+                            .filter(|r| !replaced.contains(&r.name.as_str()))
+                            .find(|r| r.keys.contains(&key))
+                            .map(|r| (key, pos, r.name.clone()))
+                    });
+                    if let Some((key, pos, other)) = shared {
+                        self.errors.push(Error::at(
+                            pos,
+                            ErrorCode::DuplicateName,
+                            format!(
+                                "Key `{key}` is in ramp `{other}` already, which palette `{}` \
+                                 copies",
+                                def.name.text
+                            ),
+                        ));
+                        continue;
+                    }
                     let missing = keys
                         .iter()
                         .find(|(k, _)| !colors.iter().any(|(c, _)| c == k));
