@@ -741,6 +741,16 @@ fn sets_that_match() {
          inconsistent_palette,inconsistent_scale)\n"
     );
     assert_eq!(set_warnings(&allowed), []);
+    // A sprite's own `lint=` allows it in any set, as a frame or as itself.
+    let odd = SETS.replace(
+        "sprite e 5x4 palette=p",
+        "sprite e 5x4 palette=p lint=allow(inconsistent_size)",
+    );
+    assert_eq!(set_warnings(&format!("{odd}group items a e\n")), []);
+    assert_eq!(
+        set_warnings(&format!("{odd}animation walk\n  a 4\n  e:flip_x 4\n")),
+        []
+    );
     // So does `lint allow` in its file, with no `lint=` on the set.
     for set in [
         format!("{SETS}group items a e\n"),

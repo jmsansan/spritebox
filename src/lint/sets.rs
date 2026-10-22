@@ -34,6 +34,12 @@ pub(super) fn check(document: &Document, index: &Index, sink: &mut Sink) {
         };
         let report = |sink: &mut Sink, code, i: usize, message: String| {
             let (sprite, pos) = members[i];
+            // The sprite's own `lint=` allows it too: for a frame's chain, that of the
+            // sprite it starts from. Tiles are not sprites of the document.
+            let base = sprite.name.split(':').next().unwrap_or_default();
+            if set.kind != Kind::Tileset && sink.allowed(code, Kind::Sprite, base) {
+                return;
+            }
             let found = Found {
                 code,
                 kind: set.kind,
