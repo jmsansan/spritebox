@@ -17,6 +17,11 @@
 - Lint checks for shading and scale (#23): `pillow_shading`, `banding`, `mixel`
   (sprites drawn at 2×–4× among 1× art) and `too_many_colors`, with their
   thresholds in `LintOptions`. Lightness is OKLab's, in fixed point.
+- Palette ramps (#24): `ramp NAME KEYS` names a material's keys, dark to light, and
+  `ramp NAME KEYS base=#rrggbb shift=DEGREES` makes their colors around a base,
+  with hue shifting, deterministically. `Palette::ramps` and `Ramp` are public.
+- Lint checks for palettes (#24): `near_duplicate_color`, `flat_ramp` and
+  `low_contrast`, with their thresholds in `LintOptions`.
 - The command-line tool's JSON diagnostics have a `severity`, `error` or `warning`.
 
 ### Changed

@@ -493,6 +493,86 @@ fn shading_and_scale() {
     );
 }
 
+/// Lines 1 to 14: colors too close, a flat ramp, a made ramp, and a grey ramp in
+/// steps too small.
+const RAMPS: &str = "\
+palette p
+  .  transparent
+  k  #1a1c2c
+  g  #38b764
+  G  #39b865
+  1  #203020
+  2  #406040
+  3  #609060
+  4  #80c080
+  ramp grass 1234
+  ramp skin abcde base=#d08159 shift=20
+  x  #808080
+  y  #848484
+  ramp grey xy
+sprite s 13x1 palette=p lint=allow(too_many_colors)
+  .kgG1234abcde
+sprite t 2x1 palette=p
+  xy
+";
+
+#[test]
+fn palettes_and_ramps() {
+    let found = |options: &LintOptions| -> Vec<(LintCode, usize, usize)> {
+        let doc: Document = RAMPS.parse().unwrap();
+        doc.lint(options)
+            .warnings
+            .into_iter()
+            .map(|w| {
+                let p = w.position.unwrap();
+                (w.code, p.line, p.column)
+            })
+            .collect()
+    };
+    use LintCode::*;
+    // The made ramp, `skin`, turns its hue and steps clearly: nothing to report.
+    assert_eq!(
+        found(&LintOptions::default()),
+        [
+            (NearDuplicateColor, 5, 3),
+            (FlatRamp, 10, 8),
+            (NearDuplicateColor, 13, 3),
+            (LowContrast, 14, 14)
+        ]
+    );
+    let messages: Vec<String> = RAMPS
+        .parse::<Document>()
+        .unwrap()
+        .lint(&LintOptions::default())
+        .warnings
+        .into_iter()
+        .map(|w| w.message)
+        .collect();
+    assert_eq!(
+        messages[0],
+        "Keys `g` and `G` of palette `p` are almost the same color, 0.0030 apart in OKLab; \
+         one would do"
+    );
+    assert_eq!(
+        messages[3],
+        "Keys `x` and `y` of ramp `grey` differ by 0.0134 in lightness, too little to tell \
+         apart"
+    );
+    // The thresholds are options; grey ramps are never flat.
+    let lenient = LintOptions {
+        min_color_distance: 0,
+        min_ramp_step: 0,
+        ..LintOptions::default()
+    };
+    assert_eq!(found(&lenient), [(FlatRamp, 10, 8)]);
+    // Unused keys are not judged as too close: drop `G` from the sprite.
+    let text = RAMPS.replace(".kgG1234abcde", ".kgg1234abcde");
+    let doc: Document = text.parse().unwrap();
+    let lint = doc.lint(&LintOptions::default());
+    assert_eq!(lint.count(NearDuplicateColor), 1);
+    assert_eq!(lint.count(UnusedKey), 1);
+}
+
 const SWAPS: &str = "\
 palette base
   .  transparent

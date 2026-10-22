@@ -147,6 +147,84 @@ fn structural_errors() {
 }
 
 #[test]
+fn ramps() {
+    let doc: Document = "\
+palette p
+  a  #000000
+  b  #ffffff
+  ramp warm cde base=#d08159
+  ramp grey ab
+palette q from=p
+  ramp warm edc
+  ramp more fg base=#3b5dc9 shift=0
+"
+    .parse()
+    .unwrap();
+    let p = doc.palette("p").unwrap();
+    let names = |palette: &spritebox::Palette| -> Vec<(String, String)> {
+        palette
+            .ramps()
+            .iter()
+            .map(|r| (r.name().to_owned(), r.keys().iter().collect()))
+            .collect()
+    };
+    let pairs = |list: &[(&str, &str)]| -> Vec<(String, String)> {
+        list.iter()
+            .map(|&(a, b)| (a.to_owned(), b.to_owned()))
+            .collect()
+    };
+    assert_eq!(names(p), pairs(&[("warm", "cde"), ("grey", "ab")]));
+    // A made ramp defines its keys, dark to light, with the base in the middle.
+    assert_eq!(p.color('d'), Some(Color::rgb(0xd0, 0x81, 0x59)));
+    let keys: Vec<char> = p.colors().iter().map(|&(k, _)| k).collect();
+    assert_eq!(keys, ['a', 'b', 'c', 'd', 'e']);
+    // A copy keeps the ramps it does not replace.
+    let q = doc.palette("q").unwrap();
+    assert_eq!(
+        names(q),
+        pairs(&[("warm", "edc"), ("grey", "ab"), ("more", "fg")])
+    );
+    assert_eq!(q.ramp("more").unwrap().keys(), ['f', 'g']);
+    assert!(q.ramp("none").is_none());
+}
+
+#[test]
+fn ramp_errors() {
+    use ErrorCode::*;
+    // The palette takes lines 1 to 3; the ramp is on line 4.
+    let e = |body: &str| errors(&format!("palette p\n  a #000000\n  b #ffffff\n{body}"));
+    assert_eq!(e("  ramp\n"), [(4, 7, Syntax)]);
+    assert_eq!(e("  ramp r\n"), [(4, 9, Syntax)]);
+    assert_eq!(e("  ramp r base=#808080\n"), [(4, 10, Syntax)]);
+    assert_eq!(e("  ramp r ab x\n"), [(4, 13, Syntax)]);
+    assert_eq!(e("  ramp r a\n"), [(4, 10, InvalidArgument)]);
+    assert_eq!(e("  ramp r aa\n"), [(4, 11, DuplicateName)]);
+    assert_eq!(e("  ramp r ab\n  ramp s ba\n"), [(5, 10, DuplicateName)]);
+    assert_eq!(
+        e("  ramp r ab\n  ramp r cd base=#808080\n"),
+        [(5, 8, DuplicateName)]
+    );
+    assert_eq!(e("  ramp r az\n"), [(4, 11, UnknownName)]);
+    assert_eq!(e("  ramp r cd base=#80808\n"), [(4, 18, InvalidArgument)]);
+    assert_eq!(
+        e("  ramp r cd base=#808080ff\n"),
+        [(4, 18, InvalidArgument)]
+    );
+    assert_eq!(
+        e("  ramp r cd base=#808080 shift=61\n"),
+        [(4, 32, InvalidArgument)]
+    );
+    assert_eq!(e("  ramp r cd shift=10\n"), [(4, 19, Syntax)]);
+    assert_eq!(e("  ramp r ab base=#808080\n"), [(4, 10, DuplicateName)]);
+    assert_eq!(e("  ramp r cd\n    x\n"), [(5, 5, Syntax)]);
+    // A key a ramp made is defined, so a line defining it again is an error.
+    assert_eq!(
+        e("  ramp r cd base=#808080\n  c #000000\n"),
+        [(5, 3, DuplicateName)]
+    );
+}
+
+#[test]
 fn palette_errors() {
     assert_eq!(error("palette p\n  xy #000000\n"), (2, 3, Syntax));
     // `;` starts a comment, so it cannot be a key.
@@ -293,7 +371,7 @@ fn limits() {
 #[test]
 fn never_panics_on_malformed_text() {
     let base = format!(
-        "{DAWN}\nsprite dot 2x2 palette=dawn\n  ko\n  ok\nsprite wide 4x2 palette=dawn\n  kkoo\n  ookk\n\
+        "{DAWN}  ramp warm ko\n  ramp made xy base=#d08159 shift=10\nsprite dot 2x2 palette=dawn\n  ko\n  ok\nsprite wide 4x2 palette=dawn\n  kkoo\n  ookk\n\
          sprite coin 4x2 palette=dawn\n  layer a\n    .ko.\n    kook\n  layer b = wide:flip_y\n\
          sprite c = coin:rot90:offset(1,-1):swap(dawn):outline(k)\nanimation x once\n  c:flip_x 6\n\
          tileset t 2x2 palette=dawn columns=3\n  tile a\n    ko\n    ok\n  tile b = dot:flip_x\n\
@@ -354,6 +432,9 @@ fn never_panics_on_malformed_text() {
         "import",
         "lint",
         "lint=",
+        "ramp",
+        "base=",
+        "shift=",
         "allow(",
         "orphan_pixel",
     ];

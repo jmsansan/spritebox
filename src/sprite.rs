@@ -5,6 +5,24 @@ use crate::{Color, Error, ErrorCode, Image, Limits, Result};
 pub struct Palette {
     pub(crate) name: String,
     pub(crate) colors: Vec<(char, Color)>,
+    pub(crate) ramps: Vec<Ramp>,
+}
+
+/// A ramp: the keys of a palette that shade one material, dark to light.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Ramp {
+    pub(crate) name: String,
+    pub(crate) keys: Vec<char>,
+}
+
+impl Ramp {
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+    /// The keys, darkest first.
+    pub fn keys(&self) -> &[char] {
+        &self.keys
+    }
 }
 
 impl Palette {
@@ -14,6 +32,13 @@ impl Palette {
     /// The keys and their colors, inherited keys first, in the order written.
     pub fn colors(&self) -> &[(char, Color)] {
         &self.colors
+    }
+    /// The ramps, inherited ones first, in the order written.
+    pub fn ramps(&self) -> &[Ramp] {
+        &self.ramps
+    }
+    pub fn ramp(&self, name: &str) -> Option<&Ramp> {
+        self.ramps.iter().find(|r| r.name == name)
     }
     /// The color of `key`, if the palette has it.
     pub fn color(&self, key: char) -> Option<Color> {
@@ -404,6 +429,7 @@ mod tests {
                 ('b', Color::rgb(0, 255, 0)),
                 ('k', Color::BLACK),
             ],
+            ramps: Vec::new(),
         };
         Sprite {
             name: "s".into(),
@@ -460,6 +486,7 @@ mod tests {
         let night = Palette {
             name: "night".into(),
             colors: vec![('.', Color::TRANSPARENT), ('a', Color::rgb(1, 2, 3))],
+            ramps: Vec::new(),
         };
         let swapped = s.with_palette(&night).unwrap();
         assert_eq!(swapped.render().pixel(1, 1), Some(Color::rgb(1, 2, 3)));
