@@ -253,7 +253,9 @@ fn jaggies(canvas: &Canvas, report: &Report, sink: &mut Sink) {
 /// `double_outline`: a pixel of the outline that makes an L corner with two others
 /// where one diagonal step would do, so that the line is two pixels thick there. The
 /// outline is the key of at least half the silhouette's pixels, where those pixels
-/// connect; corners of lines two pixels thick throughout are left alone.
+/// connect. Corners within 2×2 squares of the outline, as in lines two pixels thick
+/// across, are left alone, and so are corners with no fill near them: a stroke drawn
+/// on its own outlines nothing.
 fn double_outlines(canvas: &Canvas, report: &Report, sink: &mut Sink) {
     let sprite = report.sprite;
     let (w, h) = (canvas.w, canvas.h);
@@ -347,7 +349,14 @@ fn double_outlines(canvas: &Canvas, report: &Report, sink: &mut Sink) {
                         .iter()
                         .all(|&(dx, dy)| on(&mask, x + sx + dx, y + sy + dy))
                 });
-            if square || !connected(&neighbours) {
+            // The fill that the outline goes around, within two pixels.
+            let fill = (-2..=2).any(|dy: i64| {
+                (-2..=2).any(|dx: i64| {
+                    let (nx, ny) = (x + dx, y + dy);
+                    canvas.visible(nx, ny) && key(nx, ny) != Some(outline)
+                })
+            });
+            if square || !fill || !connected(&neighbours) {
                 continue;
             }
             // Taken out, so the rest of the line is judged without it.

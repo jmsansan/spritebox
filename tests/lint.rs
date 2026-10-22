@@ -253,6 +253,9 @@ fn double_outlines() {
         "sprite split 5x5 palette=p\n  kkkkk\n  kokok\n  kokok\n  kkkkk\n  .....\n",
         "sprite thick 8x8 palette=p\n  ........\n  .kkkkkk.\n  .kkkkkk.\n  .kkookk.\n  \
          .kkookk.\n  .kkkkkk.\n  .kkkkkk.\n  ........\n",
+        // A stroke drawn on its own, evenly two pixels wide, outlines nothing.
+        "sprite stroke 8x7 palette=p\n  kk......\n  .kk.....\n  ..kk....\n  ...kk...\n  \
+         ....kk..\n  .....kk.\n  ......kk\n",
         // A tile, with no transparent pixel, has no silhouette to outline.
         "sprite tile 4x4 palette=p\n  kkko\n  kkoo\n  kooo\n  oooo\n",
     ] {
