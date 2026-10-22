@@ -741,6 +741,15 @@ fn sets_that_match() {
          inconsistent_palette,inconsistent_scale)\n"
     );
     assert_eq!(set_warnings(&allowed), []);
+    // So does `lint allow` in its file, with no `lint=` on the set.
+    for set in [
+        format!("{SETS}group items a e\n"),
+        format!("{SETS}animation walk\n  a 4\n  e 4\n"),
+    ] {
+        assert_eq!(set_warnings(&set).len(), 1, "{set}");
+        let allowed = format!("lint allow inconsistent_size\n{set}");
+        assert_eq!(set_warnings(&allowed), [], "{set}");
+    }
     // Animations: frames that flash with a palette swap are fine; a frame of another
     // size is reported at its line. Lines 46 to 50.
     let flash = format!("{SETS}animation hurt\n  a 4\n  a:swap(q) 4\n  a 4\n  e 4\n");

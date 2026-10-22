@@ -694,7 +694,8 @@ impl<'a> Parser<'a, '_> {
                 detail: Detail::Other,
             });
         }
-        // Sprites that belong together: frames, groups and tiles.
+        // Sprites that belong together: frames, groups and tiles. What holds them is a
+        // definition too, so that its file's `lint allow` reaches it with no `lint=`.
         let mut sets = Vec::new();
         for (kind, name, members) in self
             .animation_sets()
@@ -702,6 +703,16 @@ impl<'a> Parser<'a, '_> {
             .chain(self.group_sets())
             .chain(self.tileset_sets())
         {
+            if !defs.iter().any(|d| d.kind == kind && d.pos == name.pos) {
+                defs.push(Def {
+                    kind,
+                    name: name.text.to_owned(),
+                    pos: name.pos,
+                    allow: Vec::new(),
+                    deps: Vec::new(),
+                    detail: Detail::Other,
+                });
+            }
             sets.push(crate::lint::Set {
                 kind,
                 name: name.text.to_owned(),
