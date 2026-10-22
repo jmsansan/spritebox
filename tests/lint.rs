@@ -387,8 +387,25 @@ fn shading_and_scale() {
         max_colors_small: 9,
         ..LintOptions::default()
     };
+    // An offset of zero still finds the pillow, whose light is exactly in the middle.
     let found = reported(shading, &lenient);
-    assert_eq!(found, [(LintCode::Mixel, "big".to_owned())]);
+    assert_eq!(
+        found,
+        [
+            (LintCode::PillowShading, "pillow".to_owned()),
+            (LintCode::Mixel, "big".to_owned())
+        ]
+    );
+    // Short bands crossing are not one long band.
+    let cross = format!(
+        "{}sprite cross 5x5 palette=p\n  ddddd\n  dmlmd\n  ddmld\n  dmlmd\n  ddddd\n",
+        shading.split("sprite pillow").next().unwrap()
+    );
+    let banded = reported(&cross, &LintOptions::default())
+        .into_iter()
+        .filter(|(c, _)| *c == LintCode::Banding)
+        .count();
+    assert_eq!(banded, 0);
     // A panel's bevel is shaded so on purpose.
     let panel = shading.replace(
         "sprite pillow 14x14 palette=p",

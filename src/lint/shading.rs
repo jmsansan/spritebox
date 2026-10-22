@@ -197,32 +197,40 @@ fn centred(pixels: &[(i64, i64, i64, i64)], side: i64, offset: u32) -> bool {
     let cut = by_light[half.saturating_sub(1)];
     let above = by_light.iter().filter(|&&l| l > cut).count();
     let at = by_light.iter().filter(|&&l| l == cut).count();
-    // Of the `at` pixels at the mark, `half - above` count, each as that share.
-    let (share, of) = ((half - above) as f64, at as f64);
-    let (mut ax, mut ay, mut lx, mut ly) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
+    // Of the `at` pixels at the mark, `half - above` count, each as that share. In
+    // exact integers: the lighter half's sums times `at`, and the centroids' offset
+    // times `half · at · n`.
+    let (mut ax, mut ay, mut bx, mut by, mut tx, mut ty) =
+        (0i128, 0i128, 0i128, 0i128, 0i128, 0i128);
     for &(x, y, l, _) in pixels {
-        let (x, y) = (x as f64, y as f64);
+        let (x, y) = (x as i128, y as i128);
         ax += x;
         ay += y;
-        let weight = if l > cut {
-            1.0
+        if l > cut {
+            bx += x;
+            by += y;
         } else if l == cut {
-            share / of
-        } else {
-            0.0
-        };
-        lx += weight * x;
-        ly += weight * y;
+            tx += x;
+            ty += y;
+        }
     }
-    let (n, half) = (n as f64, half as f64);
-    let (dx, dy) = (lx / half - ax / n, ly / half - ay / n);
-    let reach = offset as f64 / 100.0 * side as f64;
+    let (n, half, above, at) = (n as i128, half as i128, above as i128, at as i128);
+    let (lx, ly) = (bx * at + (half - above) * tx, by * at + (half - above) * ty);
+    let (dx, dy) = (lx * n - ax * half * at, ly * n - ay * half * at);
+    if offset == 0 {
+        return dx == 0 && dy == 0;
+    }
+    // The squares can pass i128; floating point compares them the same everywhere.
+    let scale = (half * at * n) as f64;
+    let reach = offset as f64 / 100.0 * side as f64 * scale;
+    let (dx, dy) = (dx as f64, dy as f64);
     dx * dx + dy * dy <= reach * reach
 }
 
-/// `banding`: a line one pixel thick, at least `banding_length` pixels long, of a
-/// color between the colors on its two sides in lightness: shades stacked in
-/// parallel lines rather than shaped. The outline is not a shade, on either side.
+/// `banding`: a line one pixel thick, reaching at least `banding_length` pixels
+/// across or down, of a color between the colors on its two sides in lightness:
+/// shades stacked in parallel lines rather than shaped. The outline is not a shade,
+/// on either side.
 fn banding(
     canvas: &Canvas,
     light: &Light,
@@ -292,12 +300,17 @@ fn banding(
                     }
                 }
             }
-            if line.len() < options.banding_length {
+            // How far the line reaches, so that short lines crossing are not one long.
+            let span = |axis: fn(&(u32, u32)) -> u32| {
+                let values = line.iter().map(axis);
+                values.clone().max().unwrap_or(0) - values.min().unwrap_or(0) + 1
+            };
+            let length = span(|p| p.0).max(span(|p| p.1)) as usize;
+            if length < options.banding_length {
                 continue;
             }
             line.sort_by_key(|&(x, y)| (y, x));
             let (fx, fy) = line[0];
-            let length = line.len();
             let name = &report.sprite.name;
             report.push(sink, LintCode::Banding, line, || {
                 format!(
