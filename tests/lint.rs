@@ -181,7 +181,10 @@ fn jaggies() {
     let warnings = lint(&format!("{LINES}{}", slope(&[1, 1, 1, 3, 1, 5])));
     let jaggy = warnings.iter().find(|w| w.code == LintCode::Jaggy).unwrap();
     let message = &jaggy.message;
-    assert!(message.contains("1, 1, 3, 1 pixels long"), "{message}");
+    assert!(
+        message.contains("1, 1, 3, 1 pixels long; the step of 3 at (3, 2)"),
+        "{message}"
+    );
     // A short step among long ones too.
     assert_eq!(
         line_work(&slope(&[3, 3, 3, 1, 3, 3, 3]), LintCode::Jaggy).len(),
@@ -235,6 +238,37 @@ fn jaggies() {
         stroke += &format!("  {row}\n");
     }
     assert_eq!(line_work(&stroke, LintCode::Jaggy).len(), 1);
+    // One warning for each uneven step, however the sides see it: a stroke with two,
+    // thickened where one side's stretch ends and the other's goes on.
+    let steps = [1, 1, 1, 3, 1, 1, 1, 3, 1, 1, 1];
+    let width: usize = steps.iter().sum();
+    let mut rows: Vec<Vec<char>> = Vec::new();
+    for y in 0..steps.len() {
+        let run = steps.len() - 1 - y;
+        let start: usize = steps[..run].iter().sum();
+        rows.push(
+            (0..width)
+                .map(|x| {
+                    if x >= start && x < start + steps[run] {
+                        'o'
+                    } else {
+                        '.'
+                    }
+                })
+                .collect(),
+        );
+    }
+    rows[4][10] = 'o';
+    let mut text = format!("sprite s {width}x{} palette=p\n", steps.len());
+    for row in &rows {
+        text += &format!("  {}\n", row.iter().collect::<String>());
+    }
+    let found = line_work(&text, LintCode::Jaggy);
+    let mut pixels: Vec<(u32, u32)> = found.iter().flat_map(|(_, _, p)| p.clone()).collect();
+    let all = pixels.len();
+    pixels.sort();
+    pixels.dedup();
+    assert_eq!((found.len(), pixels.len()), (2, all), "{found:?}");
     // Steep sides are measured down the rows: the same slope turned on its side, and
     // drawn so.
     let flat: Document = format!(

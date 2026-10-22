@@ -238,26 +238,26 @@ fn jaggies(canvas: &Canvas, report: &Report, sink: &mut Sink) {
                 })
                 .map(|w| w[1])
                 .collect();
-            if odd.is_empty() {
-                continue;
-            }
-            let pixels: Vec<(u32, u32)> = odd
-                .iter()
-                .flat_map(|r| (r.start..r.start + r.len).map(move |i| pixel(i, r.value)))
-                .collect();
-            // A stroke one pixel thin shows the same steps from both sides.
-            if !reported.insert(pixels.clone()) {
-                continue;
-            }
             let steps: Vec<String> = inner.iter().map(|r| r.len.to_string()).collect();
-            let (x, y) = pixels[0];
-            report.push(sink, LintCode::Jaggy, pixels, || {
-                format!(
-                    "Uneven steps along the edge of sprite `{name}`: {} pixels long; the step \
-                     at ({x}, {y}) breaks the line's rhythm",
-                    steps.join(", ")
-                )
-            });
+            for run in odd {
+                let pixels: Vec<(u32, u32)> = (run.start..run.start + run.len)
+                    .map(|i| pixel(i, run.value))
+                    .collect();
+                // A stroke one pixel thin shows a step from both sides; one warning a step.
+                if !reported.insert(pixels.clone()) {
+                    continue;
+                }
+                let (x, y) = pixels[0];
+                let steps = &steps;
+                report.push(sink, LintCode::Jaggy, pixels, || {
+                    format!(
+                        "Uneven steps along the edge of sprite `{name}`: {} pixels long; the \
+                         step of {} at ({x}, {y}) breaks the line's rhythm",
+                        steps.join(", "),
+                        run.len
+                    )
+                });
+            }
         }
     }
 }
