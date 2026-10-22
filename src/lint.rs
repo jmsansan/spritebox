@@ -212,9 +212,16 @@ impl Sources {
         index
     }
 
-    /// Whether the text allows `code` for the definition: by its own `lint=`, its
-    /// file's `lint allow`, or those of the sprites it is built from.
+    /// Whether the text allows `code` for the definition: by its own `lint=` or its
+    /// file's `lint allow`, or by the `lint=` of the sprites it is built from. A
+    /// file's `lint allow` stays in that file, even for sprites built from its own.
     fn allows(&self, index: &Index, kind: Kind, name: &str, code: LintCode) -> bool {
+        if let Some(def) = index.get(&(kind, name)) {
+            let file = self.file_allows.get(def.pos.file as usize);
+            if file.is_some_and(|f| f.contains(&code)) {
+                return true;
+            }
+        }
         let mut seen = HashSet::new();
         let mut stack = vec![(kind, name)];
         while let Some((kind, name)) = stack.pop() {
@@ -224,8 +231,7 @@ impl Sources {
             let Some(def) = index.get(&(kind, name)) else {
                 continue;
             };
-            let file = self.file_allows.get(def.pos.file as usize);
-            if def.allow.contains(&code) || file.is_some_and(|f| f.contains(&code)) {
+            if def.allow.contains(&code) {
                 return true;
             }
             stack.extend(def.deps.iter().map(|d| (Kind::Sprite, d.as_str())))

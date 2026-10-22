@@ -271,6 +271,36 @@ fn warnings_in_imports_name_their_file() {
         warnings[1].to_string(),
         "shared.spritebox, line 5, column 3: Nothing uses key `z` of palette `shared`"
     );
+    // Nor to a sprite here built from one of its sprites, while `lint=` on that
+    // sprite does reach it.
+    let files: HashMap<&str, &str> = HashMap::from([
+        (
+            "base.spritebox",
+            "lint allow orphan_pixel\npalette q\n  . transparent\n  g #3a7d44\n  h #468a50\n\
+             sprite base 3x3 palette=q\n  ggg\n  ggg\n  ggg\n",
+        ),
+        (
+            "allowed.spritebox",
+            "palette q\n  . transparent\n  g #3a7d44\n  h #468a50\n\
+             sprite base 3x3 palette=q lint=allow(orphan_pixel)\n  ggg\n  ggg\n  ggg\n",
+        ),
+    ]);
+    let mut loader = |name: &str| {
+        files
+            .get(name)
+            .map(|t| t.to_string())
+            .ok_or_else(|| Error::new(ErrorCode::Io, name))
+    };
+    let local =
+        "sprite noisy 3x3 palette=q\n  layer a = base\n  layer b\n    ...\n    .h.\n    ...\n";
+    let orphans_with = |import: &str, loader: &mut dyn FnMut(&str) -> Result<String, Error>| {
+        let text = format!("import {import}\n{local}");
+        let doc = Document::parse_with_loader(&text, &Limits::default(), loader).unwrap();
+        doc.lint(&LintOptions::default())
+            .count(LintCode::OrphanPixel)
+    };
+    assert_eq!(orphans_with("base.spritebox", &mut loader), 1);
+    assert_eq!(orphans_with("allowed.spritebox", &mut loader), 0);
 }
 
 #[test]

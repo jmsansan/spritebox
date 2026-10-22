@@ -779,7 +779,7 @@ fn review(text: &str) -> spritebox::Result<()> {
 
 Some art breaks a rule on purpose. `lint=allow(CODE,...)` on a definition allows those
 codes for it and for everything built from it; `lint allow CODE...` on a line of its
-own allows them in the rest of its file (not in the files that import it); and
+own allows them in its file (not in the files that import it, even for sprites they build from its sprites); and
 `LintOptions::allow`, or `--allow`, everywhere:
 
 ```text
