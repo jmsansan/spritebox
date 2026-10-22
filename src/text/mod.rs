@@ -138,7 +138,7 @@ type Parsed<T> = std::result::Result<T, Error>;
 
 /// Sprites that belong together, for lint: the kind and name of what holds them,
 /// and each sprite's name at the place that names it.
-type SetDef<'a> = (Kind, Token<'a>, Vec<(String, Position)>);
+type SetDef<'a> = (Kind, Token<'a>, Vec<crate::lint::Member>);
 
 /// A palette as written, before `from=` is resolved.
 struct PaletteDef<'a> {

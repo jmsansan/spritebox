@@ -267,7 +267,16 @@ pub(crate) struct Sources {
 pub(crate) struct Set {
     pub kind: Kind,
     pub name: String,
-    pub members: Vec<(String, Position)>,
+    pub members: Vec<Member>,
+}
+
+/// A sprite of a set: its name in the document, the place that names it, and the
+/// sprite it is made from, whose `lint=` reaches it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct Member {
+    pub name: String,
+    pub pos: Position,
+    pub source: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -327,7 +336,19 @@ impl Sources {
     /// file's `lint allow`, or by the `lint=` of the sprites it is built from. A
     /// file's `lint allow` stays in that file, even for sprites built from its own.
     fn allows(&self, index: &Index, kind: Kind, name: &str, code: LintCode) -> bool {
-        if let Some(def) = index.get(&(kind, name)) {
+        self.allows_where(index, kind, name, code, true)
+    }
+
+    /// [`Sources::allows`], with the file's `lint allow` only when `file`.
+    fn allows_where(
+        &self,
+        index: &Index,
+        kind: Kind,
+        name: &str,
+        code: LintCode,
+        file: bool,
+    ) -> bool {
+        if let Some(def) = index.get(&(kind, name)).filter(|_| file) {
             let file = self.file_allows.get(def.pos.file as usize);
             if file.is_some_and(|f| f.contains(&code)) {
                 return true;
@@ -432,6 +453,16 @@ impl<'s> Sink<'s> {
                 .insert(name.to_owned(), allowed);
             allowed
         })
+    }
+
+    /// Whether `code` is allowed for a sprite by the options or by `lint=` on it or
+    /// on what it is made from; not by its file's `lint allow`, which stays in that
+    /// file.
+    pub(super) fn allowed_by_definition(&self, code: LintCode, kind: Kind, name: &str) -> bool {
+        self.options.allow.contains(&code)
+            || self
+                .sources
+                .allows_where(&self.index, kind, name, code, false)
     }
 
     pub(super) fn push(&mut self, found: Found, message: impl FnOnce() -> String) {

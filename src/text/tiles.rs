@@ -69,12 +69,26 @@ impl<'a> Parser<'a, '_> {
         self.tilesets
             .iter()
             .map(|t| {
+                // A terrain's variants are made from its pieces, at its name.
                 let tiles = t
                     .entries
                     .iter()
-                    .filter_map(|e| match e {
-                        Entry::Tile { name, .. } => Some((name.text.to_owned(), name.pos)),
-                        Entry::Terrain { .. } => None,
+                    .flat_map(|e| match e {
+                        Entry::Tile { name, source } => vec![crate::lint::Member {
+                            name: name.text.to_owned(),
+                            pos: name.pos,
+                            source: match source {
+                                Source::Chain(chain) => Some(chain.base.text.to_owned()),
+                                Source::Rows(_) => None,
+                            },
+                        }],
+                        Entry::Terrain { name, scheme, .. } => (0..scheme.variants())
+                            .map(|v| crate::lint::Member {
+                                name: format!("{}/{v}", name.text),
+                                pos: name.pos,
+                                source: None,
+                            })
+                            .collect(),
                     })
                     .collect();
                 (Kind::Tileset, t.name, tiles)

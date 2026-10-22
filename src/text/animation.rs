@@ -28,7 +28,11 @@ impl<'a> Parser<'a, '_> {
                 let frames = a
                     .frames
                     .iter()
-                    .map(|(chain, _)| (chain.split_flips().0.canonical(), chain.base.pos))
+                    .map(|(chain, _)| crate::lint::Member {
+                        name: chain.split_flips().0.canonical(),
+                        pos: chain.base.pos,
+                        source: Some(chain.base.text.to_owned()),
+                    })
                     .collect();
                 (Kind::Animation, a.name, frames)
             })

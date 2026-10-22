@@ -10,7 +10,9 @@ pub(super) fn check(document: &Document, index: &Index, sink: &mut Sink) {
     for set in &document.sources.sets {
         // Each sprite once, at the first place that names it.
         let mut members: Vec<(&Sprite, Position)> = Vec::new();
-        for (name, pos) in &set.members {
+        let mut sources: Vec<Option<&str>> = Vec::new();
+        for member in &set.members {
+            let (name, pos) = (&member.name, &member.pos);
             if members.iter().any(|(s, _)| s.name == *name) {
                 continue;
             }
@@ -22,6 +24,7 @@ pub(super) fn check(document: &Document, index: &Index, sink: &mut Sink) {
             };
             if let Some(sprite) = sprite {
                 members.push((sprite, *pos));
+                sources.push(member.source.as_deref());
             }
         }
         if members.len() < 2 {
@@ -34,10 +37,11 @@ pub(super) fn check(document: &Document, index: &Index, sink: &mut Sink) {
         };
         let report = |sink: &mut Sink, code, i: usize, message: String| {
             let (sprite, pos) = members[i];
-            // The sprite's own `lint=` allows it too: for a frame's chain, that of the
-            // sprite it starts from. Tiles are not sprites of the document.
-            let base = sprite.name.split(':').next().unwrap_or_default();
-            if set.kind != Kind::Tileset && sink.allowed(code, Kind::Sprite, base) {
+            // The `lint=` of the sprite it is made from allows it too (not that
+            // sprite's file's `lint allow`, which stays in that file).
+            if sources[i]
+                .is_some_and(|source| sink.allowed_by_definition(code, Kind::Sprite, source))
+            {
                 return;
             }
             let found = Found {

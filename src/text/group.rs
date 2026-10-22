@@ -111,7 +111,11 @@ impl<'a> Parser<'a, '_> {
                 let members = g
                     .members
                     .iter()
-                    .map(|m| (m.text.to_owned(), m.pos))
+                    .map(|m| crate::lint::Member {
+                        name: m.text.to_owned(),
+                        pos: m.pos,
+                        source: Some(m.text.to_owned()),
+                    })
                     .collect();
                 (Kind::Group, g.name, members)
             })

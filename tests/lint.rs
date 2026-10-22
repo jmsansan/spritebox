@@ -751,6 +751,22 @@ fn sets_that_match() {
         set_warnings(&format!("{odd}animation walk\n  a 4\n  e:flip_x 4\n")),
         []
     );
+    // A tile made from a sprite takes that sprite's `lint=`.
+    let tiles_allowed = format!(
+        "{}tileset t 4x4 palette=p\n  tile one = a\n  tile two = a:flip_y\n  tile three = h\n",
+        SETS.replace(
+            "sprite h 4x4 palette=p",
+            "sprite h 4x4 palette=p lint=allow(inconsistent_scale)"
+        )
+    );
+    assert_eq!(set_warnings(&tiles_allowed), []);
+    // A terrain's variants are tiles of the set too, at its name: here drawn at 2x,
+    // against a tile drawn at 1x. Lines 46 to 52.
+    let terrain = format!(
+        "{SETS}tileset t 4x4 palette=p\n  tile plain = a\n  terrain wall 16\n    island = h\n    \
+         h_strip = h\n    v_strip = h\n    fill = h\n"
+    );
+    assert_eq!(set_warnings(&terrain), [(InconsistentScale, 47, 8)]);
     // So does `lint allow` in its file, with no `lint=` on the set.
     for set in [
         format!("{SETS}group items a e\n"),
@@ -992,6 +1008,26 @@ fn warnings_in_imports_name_their_file() {
     };
     assert_eq!(orphans_with("base.spritebox", &mut loader), 1);
     assert_eq!(orphans_with("allowed.spritebox", &mut loader), 0);
+}
+
+#[test]
+fn file_allows_stay_in_their_file_for_sets() {
+    // An imported sprite's file allows a size it may not be elsewhere: a group here
+    // is still told.
+    let files: HashMap<&str, &str> = HashMap::from([(
+        "wide.spritebox",
+        "lint allow inconsistent_size\npalette w\n  k #000000\nsprite wide 2x1 palette=w\n  kk\n",
+    )]);
+    let mut loader = |name: &str| {
+        files
+            .get(name)
+            .map(|t| t.to_string())
+            .ok_or_else(|| Error::new(ErrorCode::Io, name))
+    };
+    let text = "import wide.spritebox\nsprite dot 1x1 palette=w\n  k\ngroup pair dot wide\n";
+    let doc = Document::parse_with_loader(text, &Limits::default(), &mut loader).unwrap();
+    let lint = doc.lint(&LintOptions::default());
+    assert_eq!(lint.count(LintCode::InconsistentSize), 1);
 }
 
 #[test]
