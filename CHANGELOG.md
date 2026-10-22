@@ -27,10 +27,16 @@
 - Lint checks for sets (#25): `inconsistent_size`, `inconsistent_outline`,
   `inconsistent_palette` and `inconsistent_scale`, across an animation's frames, a
   group's sprites and a tileset's tiles.
+- Lint marks on previews (#26): `render --lint` and `PreviewOptions::lint` frame
+  each pixel a warning is about, and each sprite a warning is about as a whole, with
+  a legend. `examples/lint.spritebox` breaks every rule once, next to the art
+  corrected, and the README's "Pixel-art rules" explains each.
 - The command-line tool's JSON diagnostics have a `severity`, `error` or `warning`.
 
 ### Changed
 
+- `PreviewOptions` has a `lint` field: code that builds it field by field adds
+  `..PreviewOptions::default()`.
 - The metadata has a `groups` member, after `animations`; readers of version 1 that
   ignore unknown members are unaffected.
 - The showcase example's `dusk` palette no longer overrides keys its sprite does not

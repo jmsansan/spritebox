@@ -56,6 +56,7 @@ fn golden_preview_and_png() {
             scale: 1,
             grid: false,
             max_width: 64,
+            ..PreviewOptions::default()
         })
         .unwrap();
     assert_eq!(
