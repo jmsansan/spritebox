@@ -198,6 +198,43 @@ fn jaggies() {
     ] {
         assert_eq!(line_work(&slope(steps), LintCode::Jaggy), [], "{steps:?}");
     }
+    // Where the edge turns, the step at the turn counts on both sides of it: a valley
+    // whose far side climbs 1, 1, 3, 1, 1 from its lowest step, mirrored or not.
+    let tops = [3, 3, 4, 4, 5, 4, 3, 3, 3, 2, 1];
+    let valley = |tops: &[usize]| {
+        let mut text = format!("sprite s {}x6 palette=p\n", tops.len());
+        for y in 0..6 {
+            let row: String = tops
+                .iter()
+                .map(|&t| if y >= t { 'o' } else { '.' })
+                .collect();
+            text += &format!("  {row}\n");
+        }
+        text
+    };
+    let mirrored: Vec<usize> = tops.iter().rev().copied().collect();
+    for tops in [&tops[..], &mirrored] {
+        let found = line_work(&valley(tops), LintCode::Jaggy);
+        assert_eq!(found.len(), 1, "{tops:?}");
+        assert_eq!(found[0].2.len(), 3, "{tops:?}");
+    }
+    // A stroke one pixel thin is reported once, not from above and below.
+    let steps = [1, 1, 1, 3, 1, 5];
+    let mut stroke = String::from("sprite s 12x6 palette=p\n");
+    for y in 0..6 {
+        let start: usize = steps[..5 - y].iter().sum();
+        let row: String = (0..12)
+            .map(|x| {
+                if x >= start && x < start + steps[5 - y] {
+                    'o'
+                } else {
+                    '.'
+                }
+            })
+            .collect();
+        stroke += &format!("  {row}\n");
+    }
+    assert_eq!(line_work(&stroke, LintCode::Jaggy).len(), 1);
     // Steep sides are measured down the rows: the same slope turned on its side, and
     // drawn so.
     let flat: Document = format!(

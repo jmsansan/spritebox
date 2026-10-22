@@ -160,6 +160,7 @@ struct Run {
 /// and last steps of a stretch, which corners cut short, are not judged.
 fn jaggies(canvas: &Canvas, report: &Report, sink: &mut Sink) {
     let name = &report.sprite.name;
+    let mut reported: std::collections::HashSet<Vec<(u32, u32)>> = Default::default();
     // Each side: the first visible pixel of each column from the top or the bottom, or
     // of each row from the left or the right.
     for side in 0..4 {
@@ -205,18 +206,25 @@ fn jaggies(canvas: &Canvas, report: &Report, sink: &mut Sink) {
         while first < runs.len() {
             let mut last = first;
             let mut direction = 0;
+            let mut turns = false;
             while last + 1 < runs.len() {
                 let (a, b) = (runs[last], runs[last + 1]);
                 let step = b.value - a.value;
                 let touching = a.start + a.len == b.start;
-                if !touching || step.abs() != 1 || (direction != 0 && step != direction) {
+                if !touching || step.abs() != 1 {
+                    break;
+                }
+                if direction != 0 && step != direction {
+                    turns = true;
                     break;
                 }
                 direction = step;
                 last += 1;
             }
             let stretch = &runs[first..=last];
-            first = last + 1;
+            // Where the edge turns, the run at the turn ends one stretch and starts the
+            // next.
+            first = if turns { last } else { last + 1 };
             if stretch.len() < 5 {
                 continue;
             }
@@ -237,6 +245,10 @@ fn jaggies(canvas: &Canvas, report: &Report, sink: &mut Sink) {
                 .iter()
                 .flat_map(|r| (r.start..r.start + r.len).map(move |i| pixel(i, r.value)))
                 .collect();
+            // A stroke one pixel thin shows the same steps from both sides.
+            if !reported.insert(pixels.clone()) {
+                continue;
+            }
             let steps: Vec<String> = inner.iter().map(|r| r.len.to_string()).collect();
             let (x, y) = pixels[0];
             report.push(sink, LintCode::Jaggy, pixels, || {
