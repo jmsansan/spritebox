@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use spritebox::{
-    AtlasOptions, Document, Error, ErrorCode, ExportOptions, Limits, Position, PreviewOptions,
-    TtfOptions, png,
+    AtlasOptions, Document, Error, ErrorCode, ExportOptions, Limits, LintCode, LintOptions,
+    Position, PreviewOptions, TtfOptions, Warning, png,
 };
 
 const USAGE: &str = "\
@@ -16,6 +16,9 @@ spritebox: 2D pixel art as plain text
 Usage:
   spritebox check <file> [--json]
       Validate a file and print its diagnostics.
+  spritebox lint <file> [--strict] [--allow <code>]... [--deny <code>]... [--json]
+      Validate a file, then print warnings where its art does not follow
+      pixel-art practice. Warnings alone exit 0, unless --strict or --deny.
   spritebox render <file> --out <dir> [--scale <n>] [--padding <n>] [--no-extrude]
                    [--max-side <n>] [--json]
       Validate a file, then write atlas.png, tileset-<name>.png for each
@@ -35,10 +38,14 @@ Options:
   --max-side <n> The largest side of a texture, 1..=8192 (default 2048).
   --font <name> The font to write, when the file has several.
   --family <n>  The family name in the TrueType file (default: the font's name).
+  --strict      Exit 1 when there is any warning.
+  --allow <code> Do not report a lint code; may be repeated.
+  --deny <code> Exit 1 when a lint code is reported; may be repeated.
   -h, --help    Print this help.
   -V, --version Print the version.
 
-Exit status: 0 success, 1 the file has errors, 2 bad usage, 3 an I/O error.";
+Exit status: 0 success, 1 the file has errors (or, for lint, warnings that
+--strict or --deny fail on), 2 bad usage, 3 an I/O error.";
 
 /// Exit statuses, stable for scripts and assistants.
 const EXIT_INVALID: u8 = 1;
@@ -54,6 +61,9 @@ struct Options {
     font: Option<String>,
     family: Option<String>,
     json: bool,
+    strict: bool,
+    allow: Vec<LintCode>,
+    deny: Vec<LintCode>,
 }
 
 fn main() -> ExitCode {
@@ -80,7 +90,7 @@ fn main() -> ExitCode {
 fn parse_args(args: &[String]) -> Result<Options, String> {
     let mut iter = args.iter();
     let command = iter.next().ok_or("missing command")?.clone();
-    if !["check", "render", "font"].contains(&command.as_str()) {
+    if !["check", "lint", "render", "font"].contains(&command.as_str()) {
         return Err(format!("unknown command `{command}`"));
     }
     let mut file = None;
@@ -90,9 +100,22 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
     let mut font = None;
     let mut family = None;
     let mut json = false;
+    let mut strict = false;
+    let mut allow = Vec::new();
+    let mut deny = Vec::new();
     while let Some(arg) = iter.next() {
         match arg.as_str() {
             "--json" => json = true,
+            "--strict" => strict = true,
+            "--allow" | "--deny" => {
+                let value = iter.next().ok_or(format!("{arg} needs a lint code"))?;
+                let code: LintCode = value.parse().map_err(|e: Error| e.message)?;
+                if arg == "--allow" {
+                    allow.push(code);
+                } else {
+                    deny.push(code);
+                }
+            }
             "--out" => out = Some(PathBuf::from(iter.next().ok_or("--out needs a directory")?)),
             "--scale" => {
                 let value = iter.next().ok_or("--scale needs a number")?;
@@ -133,8 +156,13 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
     if command == "font" && out.is_none() {
         return Err("font needs --out <font.ttf>".into());
     }
-    if command == "check" && out.is_some() {
-        return Err("check writes no files; --out is for render and font".into());
+    if (command == "check" || command == "lint") && out.is_some() {
+        return Err(format!(
+            "{command} writes no files; --out is for render and font"
+        ));
+    }
+    if command != "lint" && (strict || !allow.is_empty() || !deny.is_empty()) {
+        return Err("--strict, --allow and --deny are for the lint command".into());
     }
     if command != "render" && atlas != AtlasOptions::default() {
         return Err("--padding, --no-extrude and --max-side are for render".into());
@@ -151,14 +179,17 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
         font,
         family,
         json,
+        strict,
+        allow,
+        deny,
     })
 }
 
 fn run(options: &Options) -> ExitCode {
     let text = match read_input(&options.file) {
         Ok(Ok(text)) => text,
-        Ok(Err(error)) => return report(options, &[error], &[], EXIT_INVALID),
-        Err(error) => return report(options, &[error], &[], EXIT_IO),
+        Ok(Err(error)) => return report(options, &[error], &[], &[], EXIT_INVALID),
+        Err(error) => return report(options, &[error], &[], &[], EXIT_IO),
     };
     let limits = Limits::default();
     // Imports are read from disk, relative to the file's directory.
@@ -170,15 +201,28 @@ fn run(options: &Options) -> ExitCode {
     };
     let errors = spritebox::check_with_loader(&text, &limits, &mut loader);
     if !errors.is_empty() {
-        return report(options, &errors, &[], EXIT_INVALID);
+        return report(options, &errors, &[], &[], EXIT_INVALID);
     }
     if options.command == "check" {
-        return report(options, &[], &[], 0);
+        return report(options, &[], &[], &[], 0);
     }
     let document = match Document::parse_with_loader(&text, &limits, &mut loader) {
         Ok(document) => document,
-        Err(error) => return report(options, &[error], &[], EXIT_INVALID),
+        Err(error) => return report(options, &[error], &[], &[], EXIT_INVALID),
     };
+    if options.command == "lint" {
+        let warnings = document.lint_with(
+            &LintOptions {
+                allow: options.allow.clone(),
+                ..LintOptions::default()
+            },
+            &limits,
+        );
+        let fails = (options.strict && !warnings.is_empty())
+            || warnings.iter().any(|w| options.deny.contains(&w.code));
+        let status = if fails { EXIT_INVALID } else { 0 };
+        return report(options, &[], &warnings, &[], status);
+    }
     let out = options.out.as_deref().unwrap_or(Path::new("."));
     let result = if options.command == "font" {
         write_font(&document, out, options)
@@ -186,14 +230,14 @@ fn run(options: &Options) -> ExitCode {
         render(&document, out, options, &limits)
     };
     match result {
-        Ok(written) => report(options, &[], &written, 0),
+        Ok(written) => report(options, &[], &[], &written, 0),
         Err(error) => {
             let status = match error.code {
                 ErrorCode::Io => EXIT_IO,
                 ErrorCode::InvalidArgument if options.command == "font" => EXIT_USAGE,
                 _ => EXIT_INVALID,
             };
-            report(options, &[error], &[], status)
+            report(options, &[error], &[], &[], status)
         }
     }
 }
@@ -332,9 +376,9 @@ fn import_path(base: &Path, name: &str) -> PathBuf {
     path
 }
 
-/// The file an error is in, as the user would open it.
-fn error_file(options: &Options, e: &Error, main: &str) -> String {
-    match &e.file {
+/// The file a diagnostic is in, as the user would open it.
+fn diagnostic_file(options: &Options, file: &Option<String>, main: &str) -> String {
+    match file {
         Some(imported) => import_path(&base_dir(&options.file), imported)
             .display()
             .to_string(),
@@ -342,33 +386,74 @@ fn error_file(options: &Options, e: &Error, main: &str) -> String {
     }
 }
 
+/// An error or a warning, as printed.
+struct Diagnostic<'d> {
+    severity: &'static str,
+    code: &'static str,
+    file: &'d Option<String>,
+    position: Option<Position>,
+    message: &'d str,
+}
+
 /// Prints the outcome and returns `status`.
-fn report(options: &Options, errors: &[Error], written: &[PathBuf], status: u8) -> ExitCode {
+fn report(
+    options: &Options,
+    errors: &[Error],
+    warnings: &[Warning],
+    written: &[PathBuf],
+    status: u8,
+) -> ExitCode {
     let file = if options.file == "-" {
         "<stdin>"
     } else {
         options.file.as_str()
     };
+    let diagnostics: Vec<Diagnostic> = errors
+        .iter()
+        .map(|e| Diagnostic {
+            severity: "error",
+            code: e.code.as_str(),
+            file: &e.file,
+            position: e.position,
+            message: &e.message,
+        })
+        .chain(warnings.iter().map(|w| Diagnostic {
+            severity: "warning",
+            code: w.code.as_str(),
+            file: &w.file,
+            position: w.position,
+            message: &w.message,
+        }))
+        .collect();
     if options.json {
         let mut json = String::new();
         let _ = write!(
             json,
             "{{\"version\":1,\"file\":{},\"ok\":{},\"diagnostics\":[",
             quote(file),
-            errors.is_empty()
+            status == 0
         );
-        for (i, e) in errors.iter().enumerate() {
+        for (i, d) in diagnostics.iter().enumerate() {
             if i > 0 {
                 json.push(',');
             }
-            let _ = write!(json, "{{\"code\":{}", quote(e.code.as_str()));
-            if e.file.is_some() {
-                let _ = write!(json, ",\"file\":{}", quote(&error_file(options, e, file)));
+            let _ = write!(
+                json,
+                "{{\"code\":{},\"severity\":{}",
+                quote(d.code),
+                quote(d.severity)
+            );
+            if d.file.is_some() {
+                let _ = write!(
+                    json,
+                    ",\"file\":{}",
+                    quote(&diagnostic_file(options, d.file, file))
+                );
             }
-            if let Some(p) = e.position {
+            if let Some(p) = d.position {
                 let _ = write!(json, ",\"line\":{},\"column\":{}", p.line, p.column);
             }
-            let _ = write!(json, ",\"message\":{}}}", quote(&e.message));
+            let _ = write!(json, ",\"message\":{}}}", quote(d.message));
         }
         json.push_str("],\"written\":[");
         for (i, path) in written.iter().enumerate() {
@@ -380,24 +465,26 @@ fn report(options: &Options, errors: &[Error], written: &[PathBuf], status: u8) 
         json.push_str("]}");
         println!("{json}");
     } else {
-        for e in errors {
-            let at = error_file(options, e, file);
-            match e.position {
+        for d in &diagnostics {
+            let at = diagnostic_file(options, d.file, file);
+            match d.position {
                 Some(p) => eprintln!(
-                    "{at}:{}:{}: error[{}]: {}",
-                    p.line, p.column, e.code, e.message
+                    "{at}:{}:{}: {}[{}]: {}",
+                    p.line, p.column, d.severity, d.code, d.message
                 ),
-                None => eprintln!("{at}: error[{}]: {}", e.code, e.message),
+                None => eprintln!("{at}: {}[{}]: {}", d.severity, d.code, d.message),
             }
         }
         for path in written {
             println!("wrote {}", path.display());
         }
-        if errors.is_empty() && options.command == "check" {
+        let count = |n: usize, what: &str| format!("{n} {what}{}", if n == 1 { "" } else { "s" });
+        if !errors.is_empty() {
+            eprintln!("{file}: {}", count(errors.len(), "error"));
+        } else if !warnings.is_empty() {
+            eprintln!("{file}: {}", count(warnings.len(), "warning"));
+        } else if options.command == "check" || options.command == "lint" {
             println!("{file}: ok");
-        } else if !errors.is_empty() {
-            let s = if errors.len() == 1 { "" } else { "s" };
-            eprintln!("{file}: {} error{s}", errors.len());
         }
     }
     ExitCode::from(status)

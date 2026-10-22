@@ -1,6 +1,6 @@
 //! Every construct of the text format, and every error with its position and code.
 
-use spritebox::{Color, Document, ErrorCode, Limits, check};
+use spritebox::{Color, Document, ErrorCode, Limits, LintOptions, check};
 
 /// The errors of `text` as `(line, column, code)`.
 fn errors_with(text: &str, limits: &Limits) -> Vec<(usize, usize, ErrorCode)> {
@@ -301,7 +301,8 @@ fn never_panics_on_malformed_text() {
          \x20   fill = dot\ntilemap m outside=empty\n  legend\n    . empty\n    # d solid\n    a a\n\
          \x20 map\n    .#a\n    ##.\nfont f height=2 baseline=1 spacing=2\n  glyph A advance=3\n    #.\n    ##\n\
          \x20 glyph U+003B\n    #\n    #\ntexture n 4x4 palette=dawn seed=9\n  noise cell=2 octaves=2\n\
-         \x20 ramp k o .\n  dither bayer2\nsprite panel = n:pad(1) slice=2\n"
+         \x20 ramp k o .\n  dither bayer2\nsprite panel = n:pad(1) slice=2 lint=allow(orphan_pixel)\n\
+         lint allow unused_key\n"
     );
     let base_errors = check(&base, &Limits::default());
     assert!(base_errors.is_empty(), "{base_errors:?}");
@@ -351,6 +352,10 @@ fn never_panics_on_malformed_text() {
         "cell=",
         "seed=",
         "import",
+        "lint",
+        "lint=",
+        "allow(",
+        "orphan_pixel",
     ];
     for i in 0..=base.len() {
         if !base.is_char_boundary(i) {
@@ -359,7 +364,9 @@ fn never_panics_on_malformed_text() {
         for fragment in fragments {
             let text = format!("{}{fragment}{}", &base[..i], &base[i..]);
             let _ = check(&text, &Limits::default());
-            let _ = Document::parse(&text);
+            if let Ok(doc) = Document::parse(&text) {
+                let _ = doc.lint(&LintOptions::default());
+            }
         }
         let _ = check(&base[..i], &Limits::default());
     }

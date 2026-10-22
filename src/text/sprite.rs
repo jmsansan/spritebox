@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use super::chain::{self, Chain};
 use super::lex::{Node, Token};
 use super::{Header, Parsed, Parser, check_name, duplicate, size};
+use crate::lint::{Detail, Kind};
 use crate::sprite::{Insets, Layer};
 use crate::{Error, ErrorCode, Palette, Position, Sprite};
 
@@ -47,8 +48,29 @@ pub(crate) enum Source<'a> {
 }
 
 impl SpriteDef<'_> {
+    /// How the sprite is written, for lint.
+    pub(super) fn detail(&self) -> Detail {
+        match &self.body {
+            Body::Grid { layers, .. } => Detail::Drawn(
+                layers
+                    .iter()
+                    .filter_map(|l| match &l.source {
+                        Source::Rows(rows) => {
+                            Some(rows.iter().map(|r| (r.pos, r.text.to_owned())).collect())
+                        }
+                        Source::Chain(_) => None,
+                    })
+                    .collect(),
+            ),
+            Body::Texture { ramp, .. } => {
+                Detail::Texture(ramp.iter().filter_map(|t| t.text.chars().next()).collect())
+            }
+            Body::Derived(_) => Detail::Other,
+        }
+    }
+
     /// The sprites that this one is built from.
-    fn dependencies(&self) -> Vec<Token<'_>> {
+    pub(super) fn dependencies(&self) -> Vec<Token<'_>> {
         match &self.body {
             Body::Derived(chain) => vec![chain.base],
             Body::Texture { .. } => Vec::new(),
@@ -99,7 +121,9 @@ impl<'a> Parser<'a, '_> {
             None => None,
         };
         let name = header.name;
-        header.finish("sprite", "`palette=` or `slice=`")?;
+        let lint = header.option("lint");
+        header.finish("sprite", "`palette=`, `slice=` or `lint=`")?;
+        self.lint_option(Kind::Sprite, name, lint)?;
 
         let layered = node
             .children
@@ -173,15 +197,19 @@ impl<'a> Parser<'a, '_> {
             tokens[2].end_error("Expected a sprite and its modifiers after `=`".to_owned())
         })?;
         let mut slice = None;
+        let mut lint = None;
         for &extra in &tokens[4..] {
-            match extra.text.strip_prefix("slice=") {
-                Some(value) if slice.is_none() => {
-                    let token = Token {
-                        text: value,
-                        pos: extra.at("slice=".len()),
-                    };
+            let value = |prefix: &str| {
+                extra.text.strip_prefix(prefix).map(|value| Token {
+                    text: value,
+                    pos: extra.at(prefix.len()),
+                })
+            };
+            match (value("slice="), value("lint=")) {
+                (Some(token), _) if slice.is_none() => {
                     slice = Some((insets(token)?, token));
                 }
+                (_, Some(token)) if lint.is_none() => lint = Some(token),
                 _ => {
                     return Err(extra.error(
                         ErrorCode::Syntax,
@@ -200,6 +228,7 @@ impl<'a> Parser<'a, '_> {
             ));
         }
         let chain = chain::parse(chain_token, self.limits)?;
+        self.lint_option(Kind::Sprite, name, lint)?;
         self.sprites.push(SpriteDef {
             name,
             body: Body::Derived(chain),

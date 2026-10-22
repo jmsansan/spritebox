@@ -14,8 +14,6 @@ palette field
   c  #41a6f6   ; sky
 
 palette dusk from=field
-  o  #b86f50
-  y  #e4a672
   p  #3b5dc9
   P  #73eff7
 

@@ -11,7 +11,8 @@ mod tiles;
 
 use std::collections::HashMap;
 
-use crate::{Color, Document, Error, ErrorCode, Limits, Palette, Position, Sprite};
+use crate::lint::{Def, Detail, Kind, Sources};
+use crate::{Color, Document, Error, ErrorCode, Limits, LintCode, Palette, Position, Sprite};
 use animation::AnimationDef;
 use import::Files;
 pub(crate) use import::Loader;
@@ -20,8 +21,8 @@ use sprite::SpriteDef;
 use tiles::{TilemapDef, TilesetDef};
 
 /// The directives that start a definition.
-const DIRECTIVES: &str =
-    "`import`, `palette`, `sprite`, `texture`, `animation`, `tileset`, `tilemap` or `font`";
+const DIRECTIVES: &str = "`import`, `palette`, `sprite`, `texture`, `animation`, `tileset`, \
+    `tilemap`, `font` or `lint`";
 
 /// Parses `text`, loading the files it imports through `loader`. Returns the
 /// document, complete when there are no errors, and the errors ordered by file, then
@@ -61,6 +62,8 @@ pub(crate) fn parse(
         tilemaps: Vec::new(),
         fonts: Vec::new(),
         failed_fonts: Vec::new(),
+        allows: Vec::new(),
+        file_allows: Vec::new(),
     };
     // Imported definitions take the place of their `import`.
     let mut walk = Walk {
@@ -71,7 +74,8 @@ pub(crate) fn parse(
     };
     walk.walked[0] = true;
     walk.file(&mut parser, 0);
-    let document = parser.resolve();
+    let mut document = parser.resolve();
+    document.sources = parser.sources(&files.names);
     let mut errors = parser.errors;
     errors.sort_by_key(|e| e.position);
     for e in &mut errors {
@@ -133,6 +137,8 @@ struct PaletteDef<'a> {
     name: Token<'a>,
     from: Option<Token<'a>>,
     colors: Vec<(char, Color)>,
+    /// Where each of `colors` is written.
+    positions: Vec<Position>,
 }
 
 struct Parser<'a, 'l> {
@@ -146,6 +152,10 @@ struct Parser<'a, 'l> {
     fonts: Vec<(Token<'a>, crate::Font)>,
     /// Fonts with errors, which were reported, kept so their names are known.
     failed_fonts: Vec<Token<'a>>,
+    /// The lint codes that definitions allow with `lint=`, by kind and name.
+    allows: Vec<(Kind, Token<'a>, Vec<LintCode>)>,
+    /// The lint codes that `lint allow` allows, by file.
+    file_allows: Vec<(u32, Vec<LintCode>)>,
 }
 
 /// The words of a definition's first line after its keyword and name: positional
@@ -243,6 +253,15 @@ fn check_name(token: Token) -> Parsed<()> {
     Ok(())
 }
 
+/// A lint code by name, or an error at `pos`.
+fn lint_code(name: &str, pos: Position) -> Parsed<LintCode> {
+    if name.is_empty() {
+        return Err(Error::at(pos, ErrorCode::Syntax, "Expected a lint code"));
+    }
+    name.parse()
+        .map_err(|e: Error| Error::at(pos, e.code, e.message))
+}
+
 /// Characters that cannot be palette keys, besides spaces and control characters.
 const RESERVED_KEYS: &[char] = &[';', '(', ')', ',', '='];
 
@@ -289,6 +308,7 @@ impl<'a> Parser<'a, '_> {
             "tilemap" => self.tilemap(node),
             "font" => self.font(node),
             "texture" => self.texture(node),
+            "lint" => self.lint(node),
             other => Err(node.line.first().error(
                 ErrorCode::Syntax,
                 format!("Unknown directive `{other}`; expected {DIRECTIVES}"),
@@ -309,8 +329,11 @@ impl<'a> Parser<'a, '_> {
             check_name(from)?;
         }
         let name = header.name;
-        header.finish("palette", "`from=`")?;
+        let lint = header.option("lint");
+        header.finish("palette", "`from=` or `lint=`")?;
+        self.lint_option(Kind::Palette, name, lint)?;
         let mut colors: Vec<(char, Color)> = Vec::new();
+        let mut positions = Vec::new();
         for child in &node.children {
             match palette_entry(child) {
                 Ok((key, color)) => {
@@ -327,13 +350,147 @@ impl<'a> Parser<'a, '_> {
                         ));
                     } else {
                         colors.push((key, color));
+                        positions.push(child.line.first().pos);
                     }
                 }
                 Err(e) => self.errors.push(e),
             }
         }
-        self.palettes.push(PaletteDef { name, from, colors });
+        self.palettes.push(PaletteDef {
+            name,
+            from,
+            colors,
+            positions,
+        });
         Ok(())
+    }
+
+    /// `lint allow CODE...`: codes not reported anywhere in this file.
+    fn lint(&mut self, node: &Node<'a>) -> Parsed<()> {
+        let tokens = &node.line.tokens;
+        match tokens.get(1) {
+            Some(t) if t.text == "allow" => {}
+            Some(t) => {
+                return Err(t.error(
+                    ErrorCode::Syntax,
+                    format!("Expected `lint allow CODE...`, not `lint {}`", t.text),
+                ));
+            }
+            None => {
+                return Err(tokens[0].end_error(
+                    "Expected `allow` and the lint codes, such as `lint allow orphan_pixel`"
+                        .to_owned(),
+                ));
+            }
+        }
+        if tokens.len() < 3 {
+            return Err(tokens[1].end_error(
+                "Expected the lint codes to allow, such as `lint allow orphan_pixel`".to_owned(),
+            ));
+        }
+        if let Some(child) = node.children.first() {
+            return Err(child
+                .line
+                .first()
+                .error(ErrorCode::Syntax, "Unexpected indented line under `lint`"));
+        }
+        let codes = tokens[2..]
+            .iter()
+            .map(|t| lint_code(t.text, t.pos))
+            .collect::<Parsed<Vec<_>>>()?;
+        self.file_allows.push((tokens[0].pos.file, codes));
+        Ok(())
+    }
+
+    /// Records the codes of a definition's `lint=allow(CODE,...)`.
+    fn lint_option(&mut self, kind: Kind, name: Token<'a>, value: Option<Token<'a>>) -> Parsed<()> {
+        let Some(token) = value else { return Ok(()) };
+        let invalid = || {
+            token.error(
+                ErrorCode::Syntax,
+                format!("Expected `lint=allow(CODE,...)`, not `lint={}`", token.text),
+            )
+        };
+        let inner = token
+            .text
+            .strip_prefix("allow(")
+            .and_then(|t| t.strip_suffix(')'))
+            .ok_or_else(invalid)?;
+        let mut codes = Vec::new();
+        let mut offset = "allow(".len();
+        for part in inner.split(',') {
+            let lead = part.chars().take_while(|c| *c == ' ').count();
+            codes.push(lint_code(part.trim(), token.at(offset + lead))?);
+            offset += part.chars().count() + 1;
+        }
+        self.allows.push((kind, name, codes));
+        Ok(())
+    }
+
+    /// What the document keeps of the text for lint: the definitions' positions, how
+    /// they are built, and the codes they allow.
+    fn sources(&self, files: &[String]) -> Sources {
+        let allow = |kind: Kind, name: Token| -> Vec<LintCode> {
+            self.allows
+                .iter()
+                .filter(|(k, n, _)| *k == kind && n.pos == name.pos)
+                .flat_map(|(_, _, codes)| codes.iter().copied())
+                .collect()
+        };
+        let mut defs = Vec::new();
+        for p in &self.palettes {
+            defs.push(Def {
+                kind: Kind::Palette,
+                name: p.name.text.to_owned(),
+                pos: p.name.pos,
+                allow: allow(Kind::Palette, p.name),
+                deps: Vec::new(),
+                detail: Detail::Palette {
+                    from: p.from.map(|t| t.text.to_owned()),
+                    keys: p
+                        .colors
+                        .iter()
+                        .zip(&p.positions)
+                        .map(|(&(key, _), &pos)| (key, pos))
+                        .collect(),
+                },
+            });
+        }
+        for s in &self.sprites {
+            defs.push(Def {
+                kind: Kind::Sprite,
+                name: s.name.text.to_owned(),
+                pos: s.name.pos,
+                allow: allow(Kind::Sprite, s.name),
+                deps: s.dependencies().iter().map(|t| t.text.to_owned()).collect(),
+                detail: s.detail(),
+            });
+        }
+        // Other definitions matter only for what they allow.
+        for &(kind, name, ref codes) in &self.allows {
+            if matches!(kind, Kind::Palette | Kind::Sprite) {
+                continue;
+            }
+            defs.push(Def {
+                kind,
+                name: name.text.to_owned(),
+                pos: name.pos,
+                allow: codes.clone(),
+                deps: Vec::new(),
+                detail: Detail::Other,
+            });
+        }
+        let mut file_allows = vec![Vec::new(); files.len()];
+        for (file, codes) in &self.file_allows {
+            if let Some(allowed) = file_allows.get_mut(*file as usize) {
+                allowed.extend(codes.iter().copied());
+            }
+        }
+        Sources {
+            files: files.to_vec(),
+            file_allows,
+            defs,
+        }
     }
 
     /// Resolves names and builds the document, recording errors.
@@ -355,6 +512,7 @@ impl<'a> Parser<'a, '_> {
             tilesets,
             tilemaps,
             fonts,
+            sources: Sources::default(),
         }
     }
 
