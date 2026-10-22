@@ -406,6 +406,42 @@ fn shading_and_scale() {
         ..LintOptions::default()
     };
     assert_eq!(reported(&alone, &keys), []);
+    // Rings around a square: where the lighter half ends within a shade, no part of
+    // that shade is favoured, so the light stays in the middle.
+    let mut square = String::from("sprite square 12x12 palette=p\n");
+    for y in 0..12i32 {
+        let row: String = (0..12i32)
+            .map(|x| {
+                let ring = x.min(y).min(11 - x).min(11 - y);
+                match ring {
+                    0 => '.',
+                    1 => 'k',
+                    2 | 3 => 'd',
+                    4 => 'm',
+                    _ => 'w',
+                }
+            })
+            .collect();
+        square += &format!("  {row}\n");
+    }
+    let palette = SHADING.split("sprite pillow").next().unwrap();
+    let found = reported(&format!("{palette}{square}"), &keys);
+    // (Its ring one pixel thick is banding too.)
+    assert!(
+        found.contains(&(LintCode::PillowShading, "square".to_owned())),
+        "{found:?}"
+    );
+    // The limit for any sprite holds for small ones too.
+    let capped = LintOptions {
+        max_colors_small: 16,
+        max_colors: 8,
+        ..keys.clone()
+    };
+    let rainbow = format!("{palette}sprite rainbow 3x3 palette=p\n  123\n  456\n  789\n");
+    assert_eq!(
+        reported(&rainbow, &capped),
+        [(LintCode::TooManyColors, "rainbow".to_owned())]
+    );
 }
 
 const SWAPS: &str = "\

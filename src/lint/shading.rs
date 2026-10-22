@@ -31,8 +31,9 @@ fn too_many_colors(canvas: &Canvas, report: &Report, options: &LintOptions, sink
     colors.sort_by_key(|c| c.to_array());
     colors.dedup();
     let small = canvas.w < 32 && canvas.h < 32;
+    // The limit for any sprite holds for small ones too.
     let limit = if small {
-        options.max_colors_small
+        options.max_colors_small.min(options.max_colors)
     } else {
         options.max_colors
     };
@@ -119,39 +120,7 @@ fn pillow_shading(canvas: &Canvas, report: &Report, options: &LintOptions, sink:
     if colors.len() < 3 || pixels.len() < 16 {
         return;
     }
-    // Lightness must rise with the distance from the edge: a correlation of at least
-    // one half.
-    let n = pixels.len() as i128;
-    let (mut sl, mut sd, mut sll, mut sdd, mut sld) = (0i128, 0i128, 0i128, 0i128, 0i128);
-    for &(_, _, l, d) in &pixels {
-        let (l, d) = (l as i128, d as i128);
-        sl += l;
-        sd += d;
-        sll += l * l;
-        sdd += d * d;
-        sld += l * d;
-    }
-    let covariance = n * sld - sl * sd;
-    let spread = (n * sll - sl * sl) * (n * sdd - sd * sd);
-    if covariance <= 0 || 4 * covariance * covariance < spread {
-        return;
-    }
-    // And the light must sit in the middle.
-    let (sx, sy) = pixels.iter().fold((0i128, 0i128), |(a, b), p| {
-        (a + p.0 as i128, b + p.1 as i128)
-    });
-    let mut lighter = pixels.clone();
-    lighter.sort_by_key(|&(x, y, l, _)| (-l, y, x));
-    lighter.truncate(pixels.len() / 2);
-    let m = lighter.len() as i128;
-    let (lx, ly) = lighter.iter().fold((0i128, 0i128), |(a, b), p| {
-        (a + p.0 as i128, b + p.1 as i128)
-    });
-    // |lighter/m - all/n| ≤ offset% × side, multiplied through by 100·m·n.
-    let (dx, dy) = (lx * n - sx * m, ly * n - sy * m);
-    let side = w.min(h) as i128;
-    let reach = options.pillow_offset as i128 * side * m * n;
-    if (dx * dx + dy * dy) * 10000 > reach * reach {
+    if !rises(&pixels) || !centred(&pixels, w.min(h), options.pillow_offset) {
         return;
     }
     report.push(sink, LintCode::PillowShading, Vec::new(), || {
@@ -161,6 +130,61 @@ fn pillow_shading(canvas: &Canvas, report: &Report, options: &LintOptions, sink:
             sprite.name
         )
     });
+}
+
+/// Whether lightness rises with the distance from the edge, for `(x, y, lightness,
+/// distance)` pixels: a correlation of at least one half. The sums are exact; the
+/// last comparison is in floating point, whose basic arithmetic gives the same result
+/// everywhere, as their products can pass any integer type.
+fn rises(pixels: &[(i64, i64, i64, i64)]) -> bool {
+    let n = pixels.len() as i128;
+    let (mut sl, mut sd, mut sll, mut sdd, mut sld) = (0i128, 0i128, 0i128, 0i128, 0i128);
+    for &(_, _, l, d) in pixels {
+        let (l, d) = (l as i128, d as i128);
+        sl += l;
+        sd += d;
+        sll += l * l;
+        sdd += d * d;
+        sld += l * d;
+    }
+    let covariance = (n * sld - sl * sd) as f64;
+    let spread = (n * sll - sl * sl) as f64 * (n * sdd - sd * sd) as f64;
+    covariance > 0.0 && 4.0 * covariance * covariance >= spread
+}
+
+/// Whether the light sits in the middle: the centroid of the lighter half of
+/// `pixels` within `offset` percent of `side` from the centroid of all. Pixels as
+/// light as the one at the halfway mark count in part, all alike, so that no place
+/// is favoured among them.
+fn centred(pixels: &[(i64, i64, i64, i64)], side: i64, offset: u32) -> bool {
+    let n = pixels.len();
+    let half = n / 2;
+    let mut by_light: Vec<i64> = pixels.iter().map(|p| p.2).collect();
+    by_light.sort_unstable_by(|a, b| b.cmp(a));
+    let cut = by_light[half.saturating_sub(1)];
+    let above = by_light.iter().filter(|&&l| l > cut).count();
+    let at = by_light.iter().filter(|&&l| l == cut).count();
+    // Of the `at` pixels at the mark, `half - above` count, each as that share.
+    let (share, of) = ((half - above) as f64, at as f64);
+    let (mut ax, mut ay, mut lx, mut ly) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
+    for &(x, y, l, _) in pixels {
+        let (x, y) = (x as f64, y as f64);
+        ax += x;
+        ay += y;
+        let weight = if l > cut {
+            1.0
+        } else if l == cut {
+            share / of
+        } else {
+            0.0
+        };
+        lx += weight * x;
+        ly += weight * y;
+    }
+    let (n, half) = (n as f64, half as f64);
+    let (dx, dy) = (lx / half - ax / n, ly / half - ay / n);
+    let reach = offset as f64 / 100.0 * side as f64;
+    dx * dx + dy * dy <= reach * reach
 }
 
 /// `banding`: a line one pixel thick, at least `banding_length` pixels long, of a
@@ -259,7 +283,8 @@ pub(super) fn scale(canvas: &Canvas) -> Option<i64> {
         let mut previous: Option<Color> = None;
         let mut length = 0i64;
         for c in pixels {
-            if !colors.contains(&c) {
+            // Only whether there are three colors matters.
+            if colors.len() < 3 && !colors.contains(&c) {
                 colors.push(c);
             }
             if previous == Some(c) {
@@ -304,5 +329,31 @@ pub(super) fn mixels(scales: &[(Option<i64>, Report)], sink: &mut Sink) {
                  multiple of {scale} pixels, while other sprites are drawn at 1x"
             )
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn correlation_of_large_sprites() {
+        // An 1800×1800 fill in three rings: sums whose products pass i128.
+        let mut pixels = Vec::new();
+        for y in 0..1800i64 {
+            for x in 0..1800i64 {
+                let d = 1 + x.min(y).min(1799 - x).min(1799 - y);
+                let l = if d < 300 {
+                    2000
+                } else if d < 600 {
+                    5000
+                } else {
+                    9000
+                };
+                pixels.push((x, y, l, d));
+            }
+        }
+        assert!(rises(&pixels));
+        assert!(centred(&pixels, 1800, 10));
     }
 }
