@@ -632,6 +632,207 @@ fn palettes_and_ramps() {
     assert_eq!(low(&alike.replace("palette q from=p", allowed)), 1);
 }
 
+/// Lines 1 to 12 are palettes; `q` is a copy of `p`, `z` is not. The sprites end on
+/// line 45.
+const SETS: &str = "\
+palette p
+  .  transparent
+  k  #1a1c2c
+  o  #f4b41b
+  w  #ffffff
+palette q from=p
+  k  #3b5dc9
+palette z
+  .  transparent
+  k  #000000
+  o  #ff0000
+  w  #ffffff
+
+sprite a 4x4 palette=p
+  .kk.
+  kook
+  kook
+  .kk.
+sprite b = a:flip_x
+sprite c = a:swap(q)
+sprite d 4x4 palette=p
+  .oo.
+  oooo
+  oooo
+  .oo.
+sprite e 5x4 palette=p
+  .kkk.
+  koook
+  koook
+  .kkk.
+sprite f 4x4 palette=p
+  .ww.
+  woow
+  woow
+  .ww.
+sprite g 4x4 palette=z
+  .kk.
+  kook
+  kook
+  .kk.
+sprite h 4x4 palette=p
+  kkoo
+  kkoo
+  wwkk
+  wwkk
+";
+
+/// The code, line and column of each warning about sets in `text`.
+fn set_warnings(text: &str) -> Vec<(LintCode, usize, usize)> {
+    use LintCode::*;
+    let doc: Document = text.parse().unwrap_or_else(|e| panic!("{e}"));
+    doc.lint(&LintOptions::default())
+        .warnings
+        .into_iter()
+        .filter(|w| {
+            matches!(
+                w.code,
+                InconsistentSize | InconsistentOutline | InconsistentPalette | InconsistentScale
+            )
+        })
+        .map(|w| {
+            let p = w.position.unwrap();
+            (w.code, p.line, p.column)
+        })
+        .collect()
+}
+
+#[test]
+fn sets_that_match() {
+    use LintCode::*;
+    // Each sprite after `a` is the odd one out in one way; `c`, a palette swap of
+    // `a` to a copy of its palette, is not. Line 46 is the group.
+    let group = format!("{SETS}group items a b c d e f g h\n");
+    assert_eq!(
+        set_warnings(&group),
+        [
+            (InconsistentOutline, 46, 19),
+            (InconsistentSize, 46, 21),
+            (InconsistentOutline, 46, 23),
+            (InconsistentPalette, 46, 25),
+            (InconsistentScale, 46, 27)
+        ]
+    );
+    let doc: Document = group.parse().unwrap();
+    let warnings = doc.lint(&LintOptions::default()).warnings;
+    let messages: Vec<&str> = warnings.iter().map(|w| w.message.as_str()).collect();
+    assert!(messages.contains(&"Sprite `d` has no outline, unlike most of group `items`"));
+    assert!(messages.contains(&"Sprite `e` is 5x4, unlike the 4x4 of most of group `items`"));
+    assert!(messages.contains(
+        &"Sprite `f` is outlined in #ffffff, unlike most of group `items` drawn with \
+          palette `p`, outlined in #1a1c2c"
+    ));
+    assert!(messages.contains(
+        &"Sprite `g` uses palette `z`, which is not a copy of `p`, used by most of group \
+          `items`"
+    ));
+    assert!(
+        messages
+            .contains(&"Sprite `h` looks drawn at 2x, unlike most of group `items`, drawn at 1x")
+    );
+    // `lint=` on a group allows its codes.
+    let allowed = format!(
+        "{SETS}group items a b c d e f g h lint=allow(inconsistent_size,inconsistent_outline,\
+         inconsistent_palette,inconsistent_scale)\n"
+    );
+    assert_eq!(set_warnings(&allowed), []);
+    // A sprite's own `lint=` allows it in any set, as a frame or as itself.
+    let odd = SETS.replace(
+        "sprite e 5x4 palette=p",
+        "sprite e 5x4 palette=p lint=allow(inconsistent_size)",
+    );
+    assert_eq!(set_warnings(&format!("{odd}group items a e\n")), []);
+    assert_eq!(
+        set_warnings(&format!("{odd}animation walk\n  a 4\n  e:flip_x 4\n")),
+        []
+    );
+    // A tile made from a sprite takes that sprite's `lint=`.
+    let tiles_allowed = format!(
+        "{}tileset t 4x4 palette=p\n  tile one = a\n  tile two = a:flip_y\n  tile three = h\n",
+        SETS.replace(
+            "sprite h 4x4 palette=p",
+            "sprite h 4x4 palette=p lint=allow(inconsistent_scale)"
+        )
+    );
+    assert_eq!(set_warnings(&tiles_allowed), []);
+    // A terrain's variants are tiles of the set too, at its name: here drawn at 2x,
+    // against a tile drawn at 1x. Lines 46 to 52.
+    let terrain = format!(
+        "{SETS}tileset t 4x4 palette=p\n  tile plain = a\n  terrain wall 16\n    island = h\n    \
+         h_strip = h\n    v_strip = h\n    fill = h\n"
+    );
+    assert_eq!(set_warnings(&terrain), [(InconsistentScale, 47, 8)]);
+    // When the variants are the odd ones, among 17 tiles at 1x, the `lint=` of the
+    // sprite their pieces are made from allows them.
+    let plain: String = (0..17).map(|i| format!("  tile p{i} = a\n")).collect();
+    let many = format!(
+        "{SETS}tileset t 4x4 palette=p\n{plain}  terrain wall 16\n    island = h\n    \
+         h_strip = h\n    v_strip = h\n    fill = h\n"
+    );
+    assert_eq!(set_warnings(&many).len(), 16);
+    let allowed_pieces = many.replace(
+        "sprite h 4x4 palette=p",
+        "sprite h 4x4 palette=p lint=allow(inconsistent_scale)",
+    );
+    assert_eq!(set_warnings(&allowed_pieces), []);
+    // So does `lint allow` in its file, with no `lint=` on the set.
+    for set in [
+        format!("{SETS}group items a e\n"),
+        format!("{SETS}animation walk\n  a 4\n  e 4\n"),
+    ] {
+        assert_eq!(set_warnings(&set).len(), 1, "{set}");
+        let allowed = format!("lint allow inconsistent_size\n{set}");
+        assert_eq!(set_warnings(&allowed), [], "{set}");
+    }
+    // Animations: frames that flash with a palette swap are fine; a frame of another
+    // size is reported at its line. Lines 46 to 50.
+    let flash = format!("{SETS}animation hurt\n  a 4\n  a:swap(q) 4\n  a 4\n  e 4\n");
+    assert_eq!(set_warnings(&flash), [(InconsistentSize, 50, 3)]);
+    // A frame used twice counts once, so two sprites are an even split: the first
+    // is the usual one.
+    let even = format!("{SETS}animation blink\n  a 4\n  d 4\n  a 4\n");
+    assert_eq!(set_warnings(&even), [(InconsistentOutline, 48, 3)]);
+    // Tilesets: tiles are one size and one palette; their scale still counts.
+    let tiles = format!(
+        "{SETS}tileset t 4x4 palette=p\n  tile one = a\n  tile two = a:flip_y\n  tile three = h\n"
+    );
+    assert_eq!(set_warnings(&tiles), [(InconsistentScale, 49, 8)]);
+}
+
+#[test]
+fn groups() {
+    use ErrorCode::*;
+    let doc: Document = format!("{SETS}group items a b\ngroup more g\n")
+        .parse()
+        .unwrap();
+    let names: Vec<(&str, &[String])> = doc
+        .groups()
+        .iter()
+        .map(|g| (g.name(), g.members()))
+        .collect();
+    assert_eq!(names.len(), 2);
+    assert_eq!(names[0].0, "items");
+    assert_eq!(names[0].1, ["a", "b"]);
+    assert_eq!(doc.group("more").unwrap().members(), ["g"]);
+    // Line 46 is the group.
+    let e = |line: &str| errors(&format!("{SETS}{line}"));
+    assert_eq!(e("group\n"), [(46, 6, Syntax)]);
+    assert_eq!(e("group items\n"), [(46, 12, Syntax)]);
+    assert_eq!(e("group items a nope\n"), [(46, 15, UnknownName)]);
+    assert_eq!(e("group items a a\n"), [(46, 15, DuplicateName)]);
+    assert_eq!(e("group items a lint=allow(jaggy) b\n"), [(46, 33, Syntax)]);
+    assert_eq!(e("group items a\n  b\n"), [(47, 3, Syntax)]);
+    assert_eq!(
+        e("group items a\ngroup items b\n"),
+        [(47, 7, DuplicateName)]
+    );
+}
+
 const SWAPS: &str = "\
 palette base
   .  transparent
@@ -820,6 +1021,26 @@ fn warnings_in_imports_name_their_file() {
     };
     assert_eq!(orphans_with("base.spritebox", &mut loader), 1);
     assert_eq!(orphans_with("allowed.spritebox", &mut loader), 0);
+}
+
+#[test]
+fn file_allows_stay_in_their_file_for_sets() {
+    // An imported sprite's file allows a size it may not be elsewhere: a group here
+    // is still told.
+    let files: HashMap<&str, &str> = HashMap::from([(
+        "wide.spritebox",
+        "lint allow inconsistent_size\npalette w\n  k #000000\nsprite wide 2x1 palette=w\n  kk\n",
+    )]);
+    let mut loader = |name: &str| {
+        files
+            .get(name)
+            .map(|t| t.to_string())
+            .ok_or_else(|| Error::new(ErrorCode::Io, name))
+    };
+    let text = "import wide.spritebox\nsprite dot 1x1 palette=w\n  k\ngroup pair dot wide\n";
+    let doc = Document::parse_with_loader(text, &Limits::default(), &mut loader).unwrap();
+    let lint = doc.lint(&LintOptions::default());
+    assert_eq!(lint.count(LintCode::InconsistentSize), 1);
 }
 
 #[test]

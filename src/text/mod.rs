@@ -3,6 +3,7 @@
 mod animation;
 mod chain;
 mod font;
+mod group;
 mod import;
 mod lex;
 mod sprite;
@@ -22,7 +23,7 @@ use tiles::{TilemapDef, TilesetDef};
 
 /// The directives that start a definition.
 const DIRECTIVES: &str = "`import`, `palette`, `sprite`, `texture`, `animation`, `tileset`, \
-    `tilemap`, `font` or `lint`";
+    `tilemap`, `font`, `group` or `lint`";
 
 /// Parses `text`, loading the files it imports through `loader`. Returns the
 /// document, complete when there are no errors, and the errors ordered by file, then
@@ -65,6 +66,7 @@ pub(crate) fn parse(
         allows: Vec::new(),
         file_allows: Vec::new(),
         layer_counts: HashMap::new(),
+        groups: Vec::new(),
         palette_uses: chain::PaletteUses::new(),
     };
     // Imported definitions take the place of their `import`.
@@ -134,6 +136,10 @@ impl<'a> Walk<'_, 'a> {
 
 type Parsed<T> = std::result::Result<T, Error>;
 
+/// Sprites that belong together, for lint: the kind and name of what holds them,
+/// and each sprite's name at the place that names it.
+type SetDef<'a> = (Kind, Token<'a>, Vec<crate::lint::Member>);
+
 /// A palette as written, before `from=` is resolved.
 struct PaletteDef<'a> {
     name: Token<'a>,
@@ -180,6 +186,7 @@ struct Parser<'a, 'l> {
     /// For each sprite with a size that was built, by the position of its name: how
     /// many layers each of its written layers made.
     layer_counts: HashMap<Position, Vec<usize>>,
+    groups: Vec<group::GroupDef<'a>>,
     /// Keys that chains used from palettes they swapped away from.
     palette_uses: chain::PaletteUses,
 }
@@ -349,6 +356,7 @@ impl<'a> Parser<'a, '_> {
             "font" => self.font(node),
             "texture" => self.texture(node),
             "lint" => self.lint(node),
+            "group" => self.group(node),
             other => Err(node.line.first().error(
                 ErrorCode::Syntax,
                 format!("Unknown directive `{other}`; expected {DIRECTIVES}"),
@@ -686,6 +694,31 @@ impl<'a> Parser<'a, '_> {
                 detail: Detail::Other,
             });
         }
+        // Sprites that belong together: frames, groups and tiles. What holds them is a
+        // definition too, so that its file's `lint allow` reaches it with no `lint=`.
+        let mut sets = Vec::new();
+        for (kind, name, members) in self
+            .animation_sets()
+            .into_iter()
+            .chain(self.group_sets())
+            .chain(self.tileset_sets())
+        {
+            if !defs.iter().any(|d| d.kind == kind && d.pos == name.pos) {
+                defs.push(Def {
+                    kind,
+                    name: name.text.to_owned(),
+                    pos: name.pos,
+                    allow: Vec::new(),
+                    deps: Vec::new(),
+                    detail: Detail::Other,
+                });
+            }
+            sets.push(crate::lint::Set {
+                kind,
+                name: name.text.to_owned(),
+                members,
+            });
+        }
         let mut file_allows = vec![Vec::new(); files.len()];
         for (file, codes) in &self.file_allows {
             if let Some(allowed) = file_allows.get_mut(*file as usize) {
@@ -697,6 +730,7 @@ impl<'a> Parser<'a, '_> {
             file_allows,
             defs,
             palette_uses: self.palette_uses.clone(),
+            sets,
         }
     }
 
@@ -711,6 +745,7 @@ impl<'a> Parser<'a, '_> {
         let tilesets = self.resolve_tilesets(&palettes, &sprites);
         let tilemaps = self.resolve_tilemaps(&tilesets);
         let fonts = self.resolve_fonts();
+        let groups = self.resolve_groups(&sprites);
         Document {
             palettes,
             sprites,
@@ -719,6 +754,7 @@ impl<'a> Parser<'a, '_> {
             tilesets,
             tilemaps,
             fonts,
+            groups,
             sources: Sources::default(),
         }
     }

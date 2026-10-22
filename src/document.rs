@@ -64,6 +64,23 @@ impl Frame {
     }
 }
 
+/// A group: sprites that belong together, such as the icons of an inventory.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Group {
+    pub(crate) name: String,
+    pub(crate) members: Vec<String>,
+}
+
+impl Group {
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+    /// The sprites' names, in the order written.
+    pub fn members(&self) -> &[String] {
+        &self.members
+    }
+}
+
 /// A parsed and validated spritebox file.
 ///
 /// ```
@@ -94,6 +111,7 @@ pub struct Document {
     pub(crate) tilesets: Vec<Tileset>,
     pub(crate) tilemaps: Vec<Tilemap>,
     pub(crate) fonts: Vec<Font>,
+    pub(crate) groups: Vec<Group>,
     /// Where the definitions are in the text, for [`Document::lint`].
     pub(crate) sources: crate::lint::Sources,
 }
@@ -194,6 +212,13 @@ impl Document {
     }
     pub fn font(&self, name: &str) -> Option<&Font> {
         self.fonts.iter().find(|f| f.name == name)
+    }
+    /// The groups, in the order they are defined.
+    pub fn groups(&self) -> &[Group] {
+        &self.groups
+    }
+    pub fn group(&self, name: &str) -> Option<&Group> {
+        self.groups.iter().find(|g| g.name == name)
     }
 
     /// Packs every sprite, and every sprite that animation frames build, into one

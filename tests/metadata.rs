@@ -26,6 +26,8 @@ animation walk loop
   hero         5
   hero:flip_x  5
 
+group ui panel wide_panel
+
 tileset ground 2x2
   tile block
     gg
@@ -89,6 +91,9 @@ fn every_value_of_the_metadata() {
         {{"sprite": "hero", "rect": {hero}, "ticks": 5, "flip_x": true, "flip_y": false}}
       ]
     }}
+  }},
+  "groups": {{
+    "ui": ["panel", "wide_panel"]
   }},
   "tilesets": {{
     "ground": {{

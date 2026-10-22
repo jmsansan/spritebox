@@ -207,7 +207,7 @@ mod tiles;
 mod ttf;
 
 pub use atlas::{Atlas, AtlasAnimation, AtlasFrame, AtlasOptions, Rect, Region};
-pub use document::{Animation, Document, Frame, check, check_with_loader};
+pub use document::{Animation, Document, Frame, Group, check, check_with_loader};
 pub use error::{Error, ErrorCode, Position, Result};
 pub use export::{ATLAS_FILE, Export, ExportOptions, FontExport, METADATA_FILE, TilesetExport};
 pub use font::{Font, Glyph, TtfOptions};
