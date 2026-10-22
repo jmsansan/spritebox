@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
+
+Lint: sixteen checks for the signs of careless pixel art, each with its line and
+column, marked on previews and explained in the README's "Pixel-art rules"; palette
+ramps made with hue shifting; groups; and the Night Shift example.
 
 ### Added
 
@@ -32,6 +36,8 @@
   a legend. `examples/lint.spritebox` breaks every rule once, next to the art
   corrected, and the README's "Pixel-art rules" explains each.
 - The command-line tool's JSON diagnostics have a `severity`, `error` or `warning`.
+- The Night Shift example (#38): an original rainy-city scene in
+  `examples/night_shift/`, whose animated preview opens the README.
 
 ### Changed
 
