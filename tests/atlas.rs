@@ -213,7 +213,8 @@ animation blink once
         {{"sprite": "one", "rect": {one}, "ticks": 2, "flip_x": false, "flip_y": true}}
       ]
     }}
-  }}
+  }},
+  "groups": {{}}
 }}
 "#,
         w = atlas.image.width(),

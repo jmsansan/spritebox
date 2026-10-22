@@ -46,7 +46,7 @@ impl Canvas {
                 .any(|&(dx, dy)| !self.visible(x + dx, y + dy))
     }
     /// The outline's color: the color, as seen, of at least half the silhouette's
-    /// pixels, if any.
+    /// pixels, when something inside it is of another color.
     pub fn outline_color(&self) -> Option<Color> {
         if !self.has_silhouette() {
             return None;
@@ -64,7 +64,17 @@ impl Canvas {
         let (&outline, &n) = counts
             .iter()
             .max_by_key(|&(c, n)| (*n, std::cmp::Reverse(*c)))?;
-        (n * 2 >= total).then(|| Color::rgba(outline[0], outline[1], outline[2], outline[3]))
+        if n * 2 < total {
+            return None;
+        }
+        // An outline goes around something else: a sprite of one color, inside and
+        // on its edge, has none.
+        let color = Color::rgba(outline[0], outline[1], outline[2], outline[3]);
+        let around = (0..self.h).any(|y| {
+            (0..self.w)
+                .any(|x| self.visible(x, y) && !self.on_silhouette(x, y) && self.at(x, y) != color)
+        });
+        around.then_some(color)
     }
 }
 

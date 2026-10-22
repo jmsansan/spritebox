@@ -22,10 +22,17 @@
   with hue shifting, deterministically. `Palette::ramps` and `Ramp` are public.
 - Lint checks for palettes (#24): `near_duplicate_color`, `flat_ramp` and
   `low_contrast`, with their thresholds in `LintOptions`.
+- Groups (#25): `group NAME SPRITE...` names sprites that belong together.
+  `Document::groups` and `Group` are public, and the metadata has `groups`.
+- Lint checks for sets (#25): `inconsistent_size`, `inconsistent_outline`,
+  `inconsistent_palette` and `inconsistent_scale`, across an animation's frames, a
+  group's sprites and a tileset's tiles.
 - The command-line tool's JSON diagnostics have a `severity`, `error` or `warning`.
 
 ### Changed
 
+- The metadata has a `groups` member, after `animations`; readers of version 1 that
+  ignore unknown members are unaffected.
 - The showcase example's `dusk` palette no longer overrides keys its sprite does not
   use, which lint reported.
 

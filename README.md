@@ -527,6 +527,19 @@ as **TrueType**:
   `FontLibrary` does, and checks every glyph at 1×, 2× and 3×: each pixel is fully
   covered or not at all.
 
+### Groups
+
+`group NAME SPRITE...` names sprites that belong together, such as the icons of an
+inventory or the parts of a character, on one line:
+
+```text
+group items  sword shield potion key
+```
+
+A group's sprites must be defined, each once. Groups appear in the metadata, and
+lint checks that a group's sprites match, as it does an animation's frames and a
+tileset's tiles.
+
 ## Output
 
 **RGBA8.** Every `Image` the crate makes, from `Sprite::render` to the atlas, is
@@ -659,6 +672,7 @@ All coordinates are in **texels** (pixels of a texture) from the texture's
 | `atlas.panels` | object | For each sprite with `slice=`, its nine-slice borders `{left, top, right, bottom}`, in texels inward from each edge of its rectangle. |
 | `animations.NAME.loop` | boolean | `true`: after the last frame, start again; `false`: stay on it. |
 | `animations.NAME.frames` | array | The frames in order: `sprite` (a key of `atlas.sprites`), `rect` (its rectangle), `ticks` (how many fixed steps it shows, at least 1; 60 a second in Diamon), and `flip_x` and `flip_y` (draw the rectangle mirrored). |
+| `groups.NAME` | array of strings | The group's sprites, each a key of `atlas.sprites`, in the order written. |
 | `tilesets.NAME.image` | string | The tileset's texture: `tileset-NAME.png`. |
 | `tilesets.NAME.size` | `[width, height]` | Its size in texels. |
 | `tilesets.NAME.tile_size` | `[width, height]` | A tile's size in texels. |
@@ -806,6 +820,10 @@ fn review(text: &str) -> spritebox::Result<()> {
 | `banding` | A line one pixel thick, reaching at least `LintOptions::banding_length` (default 4) pixels across or down, of a shade between a lighter and a darker one on its two sides: shading stacked in parallel lines. The outline is not a shade. |
 | `mixel` | A sprite drawn at 2×, 3× or 4× (every run of one color, across and down, a multiple of it) in a document with sprites drawn at 1×. A document drawn at 2× throughout is consistent. |
 | `too_many_colors` | More visible colors than `LintOptions::max_colors_small` (default 8) in a sprite under 32×32, or than `LintOptions::max_colors` (default 16) in any. |
+| `inconsistent_size` | A sprite of a set (an animation's frames or a group) of another size than most of it. |
+| `inconsistent_outline` | A sprite of a set without an outline when most have one, or with one when most have none; or, among the set's sprites drawn with one palette, outlined in another color. A palette swap, as for a flash, may recolor an outline. |
+| `inconsistent_palette` | A sprite of a set drawn with a palette that is not a copy of the one most of it uses. |
+| `inconsistent_scale` | A sprite of a set (frames, a group or a tileset's tiles) drawn at another pixel scale than most of it, by the measure of `mixel`. |
 | `near_duplicate_color` | Two used keys of a palette, alike in alpha, closer than `LintOptions::min_color_distance` (default 0.03) in OKLab: one would do. |
 | `flat_ramp` | A ramp whose hue at its two ends is within 5°: shades that only change in brightness look dull. Grey ramps are never flat. |
 | `low_contrast` | Neighbouring keys of a ramp closer than `LintOptions::min_ramp_step` (default 0.06) in OKLab lightness. |

@@ -4,7 +4,8 @@ use std::collections::HashMap;
 
 use super::chain::{self, Chain};
 use super::lex::{Node, Token};
-use super::{Parsed, Parser, check_name, duplicate};
+use super::{Parsed, Parser, SetDef, check_name, duplicate};
+use crate::lint::Kind;
 use crate::{Animation, ErrorCode, Frame, Palette, Position, Sprite};
 
 /// The most ticks one frame may last: more than eighteen minutes at 60 a second.
@@ -18,6 +19,22 @@ pub(crate) struct AnimationDef<'a> {
 }
 
 impl<'a> Parser<'a, '_> {
+    /// Each animation's frames, by the names of their sprites, at their lines, for
+    /// lint.
+    pub(super) fn animation_sets(&self) -> Vec<SetDef<'a>> {
+        self.animations
+            .iter()
+            .map(|a| {
+                let frames = a
+                    .frames
+                    .iter()
+                    .map(|(chain, _)| (chain.split_flips().0.canonical(), chain.base.pos))
+                    .collect();
+                (Kind::Animation, a.name, frames)
+            })
+            .collect()
+    }
+
     pub(super) fn animation(&mut self, node: &Node<'a>) -> Parsed<()> {
         let tokens = &node.line.tokens;
         let name = *tokens

@@ -5,7 +5,8 @@ use std::collections::{BTreeSet, HashMap};
 use super::chain;
 use super::lex::{Node, Token};
 use super::sprite::Source;
-use super::{Header, Parsed, Parser, check_name, duplicate, size};
+use super::{Header, Parsed, Parser, SetDef, check_name, duplicate, size};
+use crate::lint::Kind;
 use crate::sprite::Layer;
 use crate::tiles::{Piece, Scheme, Terrain, Tilemap, Tileset, assemble};
 use crate::{Error, ErrorCode, Palette, Position, Sprite};
@@ -63,6 +64,24 @@ enum Cell {
 }
 
 impl<'a> Parser<'a, '_> {
+    /// Each tileset's tiles, at their names, for lint.
+    pub(super) fn tileset_sets(&self) -> Vec<SetDef<'a>> {
+        self.tilesets
+            .iter()
+            .map(|t| {
+                let tiles = t
+                    .entries
+                    .iter()
+                    .filter_map(|e| match e {
+                        Entry::Tile { name, .. } => Some((name.text.to_owned(), name.pos)),
+                        Entry::Terrain { .. } => None,
+                    })
+                    .collect();
+                (Kind::Tileset, t.name, tiles)
+            })
+            .collect()
+    }
+
     pub(super) fn tileset(&mut self, node: &Node<'a>) -> Parsed<()> {
         let mut header = Header::new(node, "tileset")?;
         let size_token = *header.args.first().ok_or_else(|| {

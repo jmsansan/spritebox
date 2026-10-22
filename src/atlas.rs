@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use crate::json::{Writer, list, quote};
-use crate::{Document, Error, Image, Insets, Limits, Result};
+use crate::{Document, Error, Group, Image, Insets, Limits, Result};
 
 /// How sprites are packed into an atlas.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -109,6 +109,8 @@ pub struct Atlas {
     /// order first used.
     pub regions: Vec<Region>,
     pub animations: Vec<AtlasAnimation>,
+    /// The groups, each naming sprites of `regions`.
+    pub groups: Vec<Group>,
 }
 
 impl Atlas {
@@ -128,7 +130,7 @@ impl Atlas {
         w.finish()
     }
 
-    /// Writes the `atlas` and `animations` members.
+    /// Writes the `atlas`, `animations` and `groups` members.
     pub(crate) fn write_json(&self, w: &mut Writer, image: &str) {
         w.object(Some("atlas"));
         w.string(Some("image"), image);
@@ -179,6 +181,12 @@ impl Atlas {
             }
             w.close(']');
             w.close('}');
+        }
+        w.close('}');
+        w.object(Some("groups"));
+        for group in &self.groups {
+            let members: Vec<String> = group.members.iter().map(|m| quote(m)).collect();
+            w.raw(Some(&group.name), &format!("[{}]", members.join(", ")));
         }
         w.close('}');
     }
@@ -282,6 +290,7 @@ pub(crate) fn build(document: &Document, options: &AtlasOptions, limits: &Limits
         padding: pad,
         regions,
         animations,
+        groups: document.groups.clone(),
     })
 }
 

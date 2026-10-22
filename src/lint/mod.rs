@@ -2,6 +2,7 @@
 
 mod lines;
 mod palette;
+mod sets;
 mod shading;
 
 use std::cmp::Ordering;
@@ -45,13 +46,22 @@ pub enum LintCode {
     Mixel,
     /// More colors than a sprite of its size reads well with.
     TooManyColors,
+    /// A sprite of a set (an animation's frames, a group) of another size than most.
+    InconsistentSize,
+    /// A sprite of a set with no outline, or another, when most have one; or with
+    /// one when most have none.
+    InconsistentOutline,
+    /// A sprite of a set drawn with a palette that is not a copy of the one most use.
+    InconsistentPalette,
+    /// A sprite of a set drawn at another pixel scale than most.
+    InconsistentScale,
     /// A palette key that nothing uses.
     UnusedKey,
 }
 
 impl LintCode {
     /// Every code, in order.
-    pub const ALL: [LintCode; 12] = [
+    pub const ALL: [LintCode; 16] = [
         LintCode::OrphanPixel,
         LintCode::Jaggy,
         LintCode::DoubleOutline,
@@ -60,6 +70,10 @@ impl LintCode {
         LintCode::Banding,
         LintCode::Mixel,
         LintCode::TooManyColors,
+        LintCode::InconsistentSize,
+        LintCode::InconsistentOutline,
+        LintCode::InconsistentPalette,
+        LintCode::InconsistentScale,
         LintCode::NearDuplicateColor,
         LintCode::FlatRamp,
         LintCode::LowContrast,
@@ -77,6 +91,10 @@ impl LintCode {
             LintCode::Banding => "banding",
             LintCode::Mixel => "mixel",
             LintCode::TooManyColors => "too_many_colors",
+            LintCode::InconsistentSize => "inconsistent_size",
+            LintCode::InconsistentOutline => "inconsistent_outline",
+            LintCode::InconsistentPalette => "inconsistent_palette",
+            LintCode::InconsistentScale => "inconsistent_scale",
             LintCode::NearDuplicateColor => "near_duplicate_color",
             LintCode::FlatRamp => "flat_ramp",
             LintCode::LowContrast => "low_contrast",
@@ -223,6 +241,7 @@ pub(crate) enum Kind {
     Tileset,
     Tilemap,
     Font,
+    Group,
 }
 
 /// Where definitions are in the text, and what lint they allow: what a [`Document`]
@@ -237,6 +256,18 @@ pub(crate) struct Sources {
     /// Palettes and the keys that sprites used from them midway through chains, such
     /// as `q` in `s:swap(q):outline(k):swap(p)`.
     pub palette_uses: std::collections::BTreeSet<(String, char)>,
+    /// Sprites that belong together.
+    pub sets: Vec<Set>,
+}
+
+/// Sprites that belong together: an animation's frames, a group's sprites, or a
+/// tileset's tiles, each by the name of its sprite in the document, at the place
+/// that names it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct Set {
+    pub kind: Kind,
+    pub name: String,
+    pub members: Vec<(String, Position)>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -478,6 +509,7 @@ pub(crate) fn run(document: &Document, options: &LintOptions, limits: &Limits) -
         }
     }
     shading::mixels(&scales, &mut sink);
+    sets::check(document, &index, &mut sink);
     palette::check(document, &index, options, &mut sink);
     sink.finish()
 }

@@ -395,7 +395,7 @@ fn never_panics_on_malformed_text() {
          \x20 map\n    .#a\n    ##.\nfont f height=2 baseline=1 spacing=2\n  glyph A advance=3\n    #.\n    ##\n\
          \x20 glyph U+003B\n    #\n    #\ntexture n 4x4 palette=dawn seed=9\n  noise cell=2 octaves=2\n\
          \x20 ramp k o .\n  dither bayer2\nsprite panel = n:pad(1) slice=2 lint=allow(orphan_pixel)\n\
-         lint allow unused_key\n"
+         lint allow unused_key\ngroup set dot wide lint=allow(inconsistent_size)\n"
     );
     let base_errors = check(&base, &Limits::default());
     assert!(base_errors.is_empty(), "{base_errors:?}");
@@ -450,6 +450,7 @@ fn never_panics_on_malformed_text() {
         "ramp",
         "base=",
         "shift=",
+        "group",
         "allow(",
         "orphan_pixel",
     ];
