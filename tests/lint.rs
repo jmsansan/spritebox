@@ -135,6 +135,223 @@ fn orphan_pixels_in_layers_and_derived_sprites() {
     assert_eq!(orphans(&format!("{leaf}{over}")), [(12, 4), (14, 8)]);
 }
 
+/// Lines 1 to 5; `a` is translucent.
+const LINES: &str = "\
+palette p
+  .  transparent
+  k  #1a1c2c
+  o  #f4b41b
+  a  #f4b41b80
+";
+
+/// A warning's line, column and pixels.
+type Spot = (usize, usize, Vec<(u32, u32)>);
+
+/// Each warning with `code` in `body` after `LINES`.
+fn line_work(body: &str, code: LintCode) -> Vec<Spot> {
+    lint(&format!("{LINES}{body}"))
+        .into_iter()
+        .filter(|w| w.code == code)
+        .map(|w| {
+            let p = w.position.unwrap();
+            (p.line, p.column, w.pixels)
+        })
+        .collect()
+}
+
+/// A sprite whose top edge climbs from the bottom left in steps of `steps` pixels.
+fn slope(steps: &[usize]) -> String {
+    let width: usize = steps.iter().sum();
+    let mut text = format!("sprite s {width}x{} palette=p\n", steps.len());
+    for y in 0..steps.len() {
+        let start: usize = steps[..steps.len() - 1 - y].iter().sum();
+        text += &format!("  {}{}\n", ".".repeat(start), "o".repeat(width - start));
+    }
+    text
+}
+
+/// A stroke one pixel thin that climbs from the bottom left in steps of `steps`
+/// pixels, with `extra` pixels added.
+fn stroke(steps: &[usize], extra: &[(usize, usize)]) -> String {
+    let width: usize = steps.iter().sum();
+    let mut rows: Vec<Vec<char>> = (0..steps.len())
+        .map(|y| {
+            let run = steps.len() - 1 - y;
+            let start: usize = steps[..run].iter().sum();
+            (0..width)
+                .map(|x| {
+                    if x >= start && x < start + steps[run] {
+                        'o'
+                    } else {
+                        '.'
+                    }
+                })
+                .collect()
+        })
+        .collect();
+    for &(x, y) in extra {
+        rows[y][x] = 'o';
+    }
+    let mut text = format!("sprite s {width}x{} palette=p\n", steps.len());
+    for row in &rows {
+        text += &format!("  {}\n", row.iter().collect::<String>());
+    }
+    text
+}
+
+#[test]
+fn jaggies() {
+    // A step of 3 among steps of 1, reported at its pixels; the sprite starts on line
+    // 6, so row 2 is line 9.
+    assert_eq!(
+        line_work(&slope(&[1, 1, 1, 3, 1, 5]), LintCode::Jaggy),
+        [(9, 6, vec![(3, 2), (4, 2), (5, 2)])]
+    );
+    let warnings = lint(&format!("{LINES}{}", slope(&[1, 1, 1, 3, 1, 5])));
+    let jaggy = warnings.iter().find(|w| w.code == LintCode::Jaggy).unwrap();
+    let message = &jaggy.message;
+    assert!(
+        message.contains("1, 1, 3, 1 pixels long; the step of 3 at (3, 2)"),
+        "{message}"
+    );
+    // A short step among long ones too.
+    assert_eq!(
+        line_work(&slope(&[3, 3, 3, 1, 3, 3, 3]), LintCode::Jaggy).len(),
+        1
+    );
+    // Steady lines, alternating lines and curves are clean; so are the first and last
+    // steps, which corners cut short.
+    for steps in [
+        &[2, 2, 2, 2, 2, 2][..],
+        &[2, 1, 2, 1, 2, 1, 2],
+        &[1, 1, 2, 3, 4, 6],
+        &[6, 4, 3, 2, 1, 1],
+        &[1, 4, 1, 1, 4],
+    ] {
+        assert_eq!(line_work(&slope(steps), LintCode::Jaggy), [], "{steps:?}");
+    }
+    // Where the edge turns, the step at the turn counts on both sides of it: a valley
+    // whose far side climbs 1, 1, 3, 1, 1 from its lowest step, mirrored or not.
+    let tops = [3, 3, 4, 4, 5, 4, 3, 3, 3, 2, 1];
+    let valley = |tops: &[usize]| {
+        let mut text = format!("sprite s {}x6 palette=p\n", tops.len());
+        for y in 0..6 {
+            let row: String = tops
+                .iter()
+                .map(|&t| if y >= t { 'o' } else { '.' })
+                .collect();
+            text += &format!("  {row}\n");
+        }
+        text
+    };
+    let mirrored: Vec<usize> = tops.iter().rev().copied().collect();
+    for tops in [&tops[..], &mirrored] {
+        let found = line_work(&valley(tops), LintCode::Jaggy);
+        assert_eq!(found.len(), 1, "{tops:?}");
+        assert_eq!(found[0].2.len(), 3, "{tops:?}");
+    }
+    // A stroke one pixel thin is reported once, not from above and below.
+    assert_eq!(
+        line_work(&stroke(&[1, 1, 1, 3, 1, 5], &[]), LintCode::Jaggy).len(),
+        1
+    );
+    // One warning for each uneven step, however the sides see it: a stroke with two,
+    // thickened where one side's stretch ends and the other's goes on.
+    let found = line_work(
+        &stroke(&[1, 1, 1, 3, 1, 1, 1, 3, 1, 1, 1], &[(10, 4)]),
+        LintCode::Jaggy,
+    );
+    let mut pixels: Vec<(u32, u32)> = found.iter().flat_map(|(_, _, p)| p.clone()).collect();
+    let all = pixels.len();
+    pixels.sort();
+    pixels.dedup();
+    assert_eq!((found.len(), pixels.len()), (2, all), "{found:?}");
+    // Also when the sides see overlapping parts of a step: a stroke thickened at one
+    // end of its long step.
+    assert_eq!(
+        line_work(&stroke(&[1, 1, 1, 5, 1, 1, 1], &[(7, 2)]), LintCode::Jaggy).len(),
+        1
+    );
+    // Steep sides are measured down the rows: the same slope turned on its side, and
+    // drawn so.
+    let flat: Document = format!(
+        "{LINES}{}sprite turned = s:rot90\n",
+        slope(&[1, 1, 1, 3, 1, 5])
+    )
+    .parse()
+    .unwrap();
+    let turned = flat.sprite("turned").unwrap();
+    let mut text = format!("{LINES}sprite drawn 6x12 palette=p\n");
+    for y in 0..turned.height() {
+        let row: String = (0..turned.width())
+            .map(|x| turned.key(x, y).unwrap())
+            .collect();
+        text += &format!("  {row}\n");
+    }
+    let doc: Document = text.parse().unwrap();
+    let lint = doc.lint(&LintOptions::default());
+    assert_eq!(lint.count(LintCode::Jaggy), 1);
+    assert_eq!(lint.count(LintCode::DoubleOutline), 0);
+}
+
+/// An 8×8 triangle outlined in `k`, its long side doubled when `doubled`.
+fn triangle(doubled: bool) -> String {
+    let mut text = String::from("sprite t 8x8 palette=p\n  ");
+    for y in 0..8 {
+        for x in 0..8 {
+            text.push(if x > y {
+                '.'
+            } else if x == y || x == 0 || y == 7 || (doubled && x + 1 == y) {
+                'k'
+            } else {
+                'o'
+            });
+        }
+        text.push_str("\n  ");
+    }
+    text.trim_end().to_owned() + "\n"
+}
+
+#[test]
+fn double_outlines() {
+    // Each L corner on the long side, taken out in turn, leaves one diagonal line.
+    let found = line_work(&triangle(true), LintCode::DoubleOutline);
+    let pixels: Vec<(u32, u32)> = found.iter().flat_map(|(_, _, p)| p.clone()).collect();
+    assert_eq!(pixels, [(2, 2), (3, 3), (4, 4), (5, 5)]);
+    assert_eq!((found[0].0, found[0].1), (9, 5));
+    assert_eq!(line_work(&triangle(false), LintCode::DoubleOutline), []);
+    // Square corners, lines meeting lines, and lines two pixels thick throughout are
+    // drawn on purpose.
+    for body in [
+        "sprite box 6x6 palette=p\n  kkkkk.\n  kooko.\n  kooko.\n  kkkkk.\n  ......\n  ......\n",
+        "sprite split 5x5 palette=p\n  kkkkk\n  kokok\n  kokok\n  kkkkk\n  .....\n",
+        "sprite thick 8x8 palette=p\n  ........\n  .kkkkkk.\n  .kkkkkk.\n  .kkookk.\n  \
+         .kkookk.\n  .kkkkkk.\n  .kkkkkk.\n  ........\n",
+        // A stroke drawn on its own, evenly two pixels wide, outlines nothing.
+        "sprite stroke 8x7 palette=p\n  kk......\n  .kk.....\n  ..kk....\n  ...kk...\n  \
+         ....kk..\n  .....kk.\n  ......kk\n",
+        // A tile, with no transparent pixel, has no silhouette to outline.
+        "sprite tile 4x4 palette=p\n  kkko\n  kkoo\n  kooo\n  oooo\n",
+    ] {
+        assert_eq!(line_work(body, LintCode::DoubleOutline), [], "{body}");
+    }
+}
+
+#[test]
+fn stray_alpha() {
+    let edge = "sprite s 4x4 palette=p\n  .ao.\n  oooo\n  oooo\n  oooo\n";
+    assert_eq!(
+        line_work(edge, LintCode::StrayAlpha),
+        [(7, 4, vec![(1, 0)])]
+    );
+    // Glass: translucent pixels together are an area, not leftovers; and a sprite with
+    // many translucent pixels uses them on purpose.
+    let glass = "sprite s 6x4 palette=p\n  oooooo\n  oaaooo\n  oaaooo\n  oooooo\n";
+    assert_eq!(line_work(glass, LintCode::StrayAlpha), []);
+    let ghost = "sprite s 4x3 palette=p\n  aoao\n  oooo\n  oaoa\n";
+    assert_eq!(line_work(ghost, LintCode::StrayAlpha), []);
+}
+
 const SWAPS: &str = "\
 palette base
   .  transparent
@@ -225,7 +442,7 @@ fn lint_errors() {
             "palette p\n  k #000000\nsprite s 1x1 palette=p {option}\n  k\n"
         ))
     };
-    assert_eq!(s("lint=allow(jaggy)"), [(3, 35, Syntax)]);
+    assert_eq!(s("lint=allow(wobbly)"), [(3, 35, Syntax)]);
     assert_eq!(s("lint=allow(orphan_pixel, nope)"), [(3, 49, Syntax)]);
     assert_eq!(s("lint=allow()"), [(3, 35, Syntax)]);
     assert_eq!(s("lint=orphan_pixel"), [(3, 29, Syntax)]);
@@ -235,7 +452,10 @@ fn lint_errors() {
     );
     let message = &check("lint allow nope\n", &Limits::default())[0].message;
     assert!(
-        message.starts_with("Unknown lint `nope`; expected one of orphan_pixel, unused_key"),
+        message.starts_with(
+            "Unknown lint `nope`; expected one of orphan_pixel, jaggy, double_outline, \
+             stray_alpha, unused_key"
+        ),
         "{message}"
     );
     assert_eq!(errors("lint\n"), [(1, 5, Syntax)]);
