@@ -90,6 +90,186 @@ impl Lab {
     }
 }
 
+/// OKLab to the cube roots of LMS, times [`ONE`].
+const FROM_LAB: [[i64; 3]; 3] = [
+    [1048576, 415590, 226287],
+    [1048576, -110689, -66956],
+    [1048576, -93831, -1354221],
+];
+
+/// LMS to linear sRGB, times [`ONE`].
+const FROM_LMS: [[i64; 3]; 3] = [
+    [4274773, -3468387, 242190],
+    [-1330054, 2736529, -357899],
+    [-4400, -737588, 1790564],
+];
+
+/// The sine of each whole degree from 0 to 90, times [`ONE`].
+#[rustfmt::skip]
+const SIN: [i64; 91] = [
+    0, 18300, 36595, 54878, 73145, 91389, 109606, 127789,
+    145934, 164033, 182083, 200078, 218011, 235878, 253673, 271391,
+    289027, 306574, 324028, 341383, 358634, 375776, 392803, 409711,
+    426494, 443147, 459665, 476044, 492277, 508360, 524288, 540057,
+    555661, 571095, 586356, 601438, 616338, 631049, 645568, 659890,
+    674012, 687928, 701634, 715127, 728402, 741455, 754282, 766880,
+    779244, 791370, 803256, 814897, 826289, 837430, 848316, 858943,
+    869309, 879410, 889243, 898805, 908093, 917105, 925838, 934288,
+    942454, 950333, 957922, 965219, 972223, 978930, 985339, 991448,
+    997255, 1002758, 1007956, 1012847, 1017429, 1021701, 1025662, 1029311,
+    1032646, 1035666, 1038371, 1040760, 1042832, 1044586, 1046022, 1047139,
+    1047937, 1048416, 1048576,
+];
+/// The sine and cosine of `degrees`, times [`ONE`].
+fn sin_cos(degrees: i64) -> (i64, i64) {
+    let d = degrees.rem_euclid(360);
+    let sin = |d: i64| match d {
+        0..=90 => SIN[d as usize],
+        91..=180 => SIN[(180 - d) as usize],
+        181..=270 => -SIN[(d - 180) as usize],
+        _ => -SIN[(360 - d) as usize],
+    };
+    (sin(d), sin((d + 90) % 360))
+}
+
+impl Lab {
+    /// The sRGB color of an OKLab color, opaque; `None` when it is outside sRGB by
+    /// more than rounding.
+    pub fn to_color(self) -> Option<Color> {
+        let lab = [self.l, self.a, self.b].map(|v| v as i64 * ONE / 10000);
+        let lms = FROM_LAB.map(|row| {
+            let root: i64 = row.iter().zip(&lab).map(|(m, v)| m * v).sum::<i64>() / ONE;
+            // root³ / ONE², times ONE.
+            (root as i128).pow(3) / (ONE as i128 * ONE as i128)
+        });
+        let linear = FROM_LMS.map(|row| {
+            row.iter()
+                .zip(&lms)
+                .map(|(&m, &v)| m as i128 * v)
+                .sum::<i128>()
+                / ONE as i128
+        });
+        let slack = (ONE / 500) as i128;
+        if linear
+            .iter()
+            .any(|&v| v < -slack || v > ONE as i128 + slack)
+        {
+            return None;
+        }
+        let [r, g, b] = linear.map(|v| to_srgb(v.clamp(0, ONE as i128) as i64));
+        Some(Color::rgb(r, g, b))
+    }
+
+    /// The distance between two colors, in ten-thousandths: OKLab's ΔE.
+    pub fn distance(self, other: Lab) -> i64 {
+        let d = [self.l - other.l, self.a - other.a, self.b - other.b].map(|v| v as i64);
+        isqrt((d[0] * d[0] + d[1] * d[1] + d[2] * d[2]) as u64) as i64
+    }
+
+    /// The chroma, in ten-thousandths: how far the color is from grey.
+    pub fn chroma(self) -> i64 {
+        let (a, b) = (self.a as i64, self.b as i64);
+        isqrt((a * a + b * b) as u64) as i64
+    }
+}
+
+/// The sRGB channel value whose linear value is nearest `linear`, times [`ONE`].
+fn to_srgb(linear: i64) -> u8 {
+    let above = SRGB_TO_LINEAR.partition_point(|&v| (v as i64) < linear);
+    if above == 0 {
+        return 0;
+    }
+    if above == 256 {
+        return 255;
+    }
+    let (low, high) = (
+        SRGB_TO_LINEAR[above - 1] as i64,
+        SRGB_TO_LINEAR[above] as i64,
+    );
+    if linear - low <= high - linear {
+        (above - 1) as u8
+    } else {
+        above as u8
+    }
+}
+
+/// The hue of yellow, toward which highlights turn, and of blue, toward which
+/// shadows turn, as OKLab `(a, b)` directions.
+const WARM: (i64, i64) = (130, 1000);
+const COOL: (i64, i64) = (-190, -1000);
+
+/// `count` colors from dark to light around `base`: lightness in even steps of OKLab
+/// L, centred on the base's where it fits; the hue turned toward yellow in the
+/// highlights and blue in the shadows, up to `shift` degrees at the ends; and chroma
+/// easing toward both ends. Colors that sRGB cannot show lose chroma until it can.
+pub(crate) fn ramp(base: Color, count: usize, shift: u32) -> Vec<Color> {
+    let base = Lab::from_color(base);
+    let n = count.max(2) as i64;
+    let step = 1200.min(7600 / (n - 1));
+    let span = step * (n - 1);
+    let low = (base.l as i64 - span / 2).min(9700 - span).max(600);
+    (0..n)
+        .map(|i| {
+            // Where the color sits, from -(n-1) at the dark end to n-1 at the light.
+            let t = 2 * i - (n - 1);
+            let reach = n - 1;
+            let l = low + step * i;
+            // Chroma: 100% in the middle, 70% at the ends.
+            let ease = 100 - 30 * t.abs() / reach;
+            let (mut a, mut b) = (base.a as i64 * ease / 100, base.b as i64 * ease / 100);
+            let angle = (shift as i64 * t.abs() + reach / 2) / reach;
+            if base.chroma() >= 100 && angle > 0 && t != 0 {
+                (a, b) = turn((a, b), if t > 0 { WARM } else { COOL }, angle);
+            }
+            let mut lab = Lab {
+                l: l as i32,
+                a: a as i32,
+                b: b as i32,
+            };
+            for _ in 0..24 {
+                if let Some(c) = lab.to_color() {
+                    return c;
+                }
+                lab.a = lab.a * 9 / 10;
+                lab.b = lab.b * 9 / 10;
+            }
+            Lab { a: 0, b: 0, ..lab }.to_color().unwrap_or(Color::BLACK)
+        })
+        .collect()
+}
+
+/// `(a, b)` turned toward the direction `target` by `degrees`, stopping at it.
+fn turn((a, b): (i64, i64), target: (i64, i64), degrees: i64) -> (i64, i64) {
+    let cross = |(a, b): (i64, i64)| a * target.1 - b * target.0;
+    let side = cross((a, b)).signum();
+    if side == 0 {
+        return (a, b);
+    }
+    let (sin, cos) = sin_cos(side * degrees);
+    let turned = ((a * cos - b * sin) / ONE, (a * sin + b * cos) / ONE);
+    if cross(turned).signum() == side {
+        return turned;
+    }
+    // Past the target: stop on it, at the same chroma.
+    let length = isqrt((a * a + b * b) as u64) as i64;
+    let unit = isqrt((target.0 * target.0 + target.1 * target.1) as u64) as i64;
+    (target.0 * length / unit, target.1 * length / unit)
+}
+
+/// The square root of `n`, rounded down.
+fn isqrt(n: u64) -> u64 {
+    let (mut low, mut high) = (0u64, 1 << 32);
+    while high - low > 1 {
+        let mid = (low + high) / 2;
+        if (mid as u128) * (mid as u128) <= n as u128 {
+            low = mid;
+        } else {
+            high = mid;
+        }
+    }
+    low
+}
+
 /// The cube root of `n`, rounded to nearest.
 fn cube_root(n: u64) -> u64 {
     // The largest y with y³ ≤ n; n < 2^64, so y < 2^22.
@@ -169,6 +349,79 @@ mod tests {
         assert_eq!(lab(255, 0, 0), (6280, 2249, 1258));
         assert_eq!(lab(0x1a, 0x1c, 0x2c), (2324, 44, -307));
         assert_eq!(lab(0xf4, 0xb4, 0x1b), (8082, 230, 1601));
+    }
+
+    #[test]
+    fn back_to_srgb() {
+        for r in (0..=255).step_by(15) {
+            for g in (0..=255).step_by(15) {
+                for b in (0..=255).step_by(15) {
+                    let c = Color::rgb(r, g, b);
+                    let back = Lab::from_color(c).to_color().unwrap();
+                    let off = [back.r.abs_diff(r), back.g.abs_diff(g), back.b.abs_diff(b)];
+                    assert!(off.iter().all(|&d| d <= 1), "{c:?} came back {back:?}");
+                }
+            }
+        }
+        // Too much chroma for sRGB.
+        let vivid = Lab {
+            l: 5000,
+            a: 4000,
+            b: 4000,
+        };
+        assert_eq!(vivid.to_color(), None);
+        assert_eq!(
+            Lab::from_color(Color::BLACK).distance(Lab::from_color(Color::WHITE)),
+            10000
+        );
+    }
+
+    #[test]
+    fn ramps() {
+        let base = Color::rgb(0xd0, 0x81, 0x59);
+        for count in 2..=9 {
+            let colors = ramp(base, count, 20);
+            assert_eq!(colors.len(), count);
+            let labs: Vec<Lab> = colors.iter().map(|&c| Lab::from_color(c)).collect();
+            // Dark to light, in clear steps.
+            for pair in labs.windows(2) {
+                assert!(pair[1].l - pair[0].l >= 600, "{count}: {labs:?}");
+            }
+        }
+        // An odd ramp has the base in its middle.
+        let five = ramp(base, 5, 20);
+        let middle = Lab::from_color(five[2]);
+        assert!(middle.distance(Lab::from_color(base)) <= 20, "{five:?}");
+        // The hue turns toward yellow in the highlight and blue in the shadow: the
+        // highlight's b (yellow) rises against the base's, the shadow's falls.
+        let (dark, light) = (Lab::from_color(five[0]), Lab::from_color(five[4]));
+        let hue_b = |lab: Lab| lab.b as i64 * 1000 / lab.chroma().max(1);
+        assert!(hue_b(light) > hue_b(middle), "{light:?} {middle:?}");
+        assert!(hue_b(dark) < hue_b(middle), "{dark:?} {middle:?}");
+        // No shift, no turn; grey stays grey.
+        let flat = ramp(base, 5, 0);
+        let hue = |c: Color| {
+            let lab = Lab::from_color(c);
+            (
+                lab.a as i64 * 1000 / lab.chroma(),
+                lab.b as i64 * 1000 / lab.chroma(),
+            )
+        };
+        assert!(hue(flat[0]).0.abs_diff(hue(flat[4]).0) <= 20, "{flat:?}");
+        for c in ramp(Color::rgb(128, 128, 128), 4, 30) {
+            assert!(c.r.abs_diff(c.g) <= 1 && c.g.abs_diff(c.b) <= 1, "{c:?}");
+        }
+        // Pinned: the same colors on every platform.
+        assert_eq!(
+            five.iter().map(|c| c.to_array()).collect::<Vec<_>>(),
+            [
+                [119, 64, 58, 255],
+                [163, 95, 75, 255],
+                [208, 129, 89, 255],
+                [236, 174, 128, 255],
+                [254, 221, 188, 255]
+            ]
+        );
     }
 
     #[test]

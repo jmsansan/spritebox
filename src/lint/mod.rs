@@ -1,6 +1,7 @@
 //! Lint: warnings for art that is valid but does not follow pixel-art practice.
 
 mod lines;
+mod palette;
 mod shading;
 
 use std::cmp::Ordering;
@@ -27,6 +28,13 @@ pub enum LintCode {
     DoubleOutline,
     /// A lone translucent pixel in an otherwise opaque sprite: a leftover of smoothing.
     StrayAlpha,
+    /// Two keys of a palette, both used, whose colors are too close to tell apart.
+    NearDuplicateColor,
+    /// A ramp whose hue does not change from end to end: shades that only change in
+    /// brightness look dull.
+    FlatRamp,
+    /// Neighbouring keys of a ramp too close in lightness to tell apart.
+    LowContrast,
     /// Shading that darkens toward the edges on every side, with no direction of
     /// light.
     PillowShading,
@@ -43,7 +51,7 @@ pub enum LintCode {
 
 impl LintCode {
     /// Every code, in order.
-    pub const ALL: [LintCode; 9] = [
+    pub const ALL: [LintCode; 12] = [
         LintCode::OrphanPixel,
         LintCode::Jaggy,
         LintCode::DoubleOutline,
@@ -52,6 +60,9 @@ impl LintCode {
         LintCode::Banding,
         LintCode::Mixel,
         LintCode::TooManyColors,
+        LintCode::NearDuplicateColor,
+        LintCode::FlatRamp,
+        LintCode::LowContrast,
         LintCode::UnusedKey,
     ];
 
@@ -66,6 +77,9 @@ impl LintCode {
             LintCode::Banding => "banding",
             LintCode::Mixel => "mixel",
             LintCode::TooManyColors => "too_many_colors",
+            LintCode::NearDuplicateColor => "near_duplicate_color",
+            LintCode::FlatRamp => "flat_ramp",
+            LintCode::LowContrast => "low_contrast",
             LintCode::UnusedKey => "unused_key",
         }
     }
@@ -177,6 +191,12 @@ pub struct LintOptions {
     pub max_colors_small: usize,
     /// The most colors for `too_many_colors` in any sprite. Default 16.
     pub max_colors: usize,
+    /// The smallest OKLab distance, in ten-thousandths, between two used keys of a
+    /// palette before `near_duplicate_color` reports them. Default 300 (0.03).
+    pub min_color_distance: u32,
+    /// The smallest step of OKLab lightness, in ten-thousandths, between neighbouring
+    /// keys of a ramp before `low_contrast` reports them. Default 600 (0.06).
+    pub min_ramp_step: u32,
 }
 
 impl Default for LintOptions {
@@ -188,6 +208,8 @@ impl Default for LintOptions {
             banding_length: 4,
             max_colors_small: 8,
             max_colors: 16,
+            min_color_distance: 300,
+            min_ramp_step: 600,
         }
     }
 }
@@ -223,8 +245,8 @@ pub(crate) struct Def {
     pub name: String,
     pub pos: Position,
     pub allow: Vec<LintCode>,
-    /// The sprites it is built from.
-    pub deps: Vec<String>,
+    /// What it is built from: the sprites of a sprite, the palette a palette copies.
+    pub deps: Vec<(Kind, String)>,
     pub detail: Detail,
 }
 
@@ -239,8 +261,14 @@ pub(crate) enum Detail {
     Palette {
         from: Option<String>,
         keys: Vec<(char, Position)>,
+        /// Its own ramps.
+        ramps: Vec<RampSource>,
     },
 }
+
+/// A ramp as a palette writes it: its name, the name's position, and its keys at
+/// their positions.
+pub(crate) type RampSource = (String, Position, Vec<(char, Position)>);
 
 /// A layer as written in a sprite: rows, or a sprite it is made from.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -286,7 +314,7 @@ impl Sources {
             if def.allow.contains(&code) {
                 return true;
             }
-            stack.extend(def.deps.iter().map(|d| (Kind::Sprite, d.as_str())))
+            stack.extend(def.deps.iter().map(|(kind, name)| (*kind, name.as_str())))
         }
         false
     }
@@ -355,27 +383,29 @@ impl<'s> Sink<'s> {
         }
     }
 
-    pub(super) fn push(&mut self, found: Found, message: impl FnOnce() -> String) {
-        let code = found.code;
+    /// Whether `code` is allowed for the definition: by the options or the text.
+    pub(super) fn allowed(&mut self, code: LintCode, kind: Kind, name: &str) -> bool {
         if self.options.allow.contains(&code) {
-            return;
+            return true;
         }
         let known = self
             .allowed
-            .get(&(found.kind, code))
-            .and_then(|names| names.get(found.name))
+            .get(&(kind, code))
+            .and_then(|names| names.get(name))
             .copied();
-        let allowed = known.unwrap_or_else(|| {
-            let allowed = self
-                .sources
-                .allows(&self.index, found.kind, found.name, code);
+        known.unwrap_or_else(|| {
+            let allowed = self.sources.allows(&self.index, kind, name, code);
             self.allowed
-                .entry((found.kind, code))
+                .entry((kind, code))
                 .or_default()
-                .insert(found.name.to_owned(), allowed);
+                .insert(name.to_owned(), allowed);
             allowed
-        });
-        if allowed {
+        })
+    }
+
+    pub(super) fn push(&mut self, found: Found, message: impl FnOnce() -> String) {
+        let code = found.code;
+        if self.allowed(code, found.kind, found.name) {
             return;
         }
         if let Some(i) = LintCode::ALL.iter().position(|&c| c == code) {
@@ -448,7 +478,7 @@ pub(crate) fn run(document: &Document, options: &LintOptions, limits: &Limits) -
         }
     }
     shading::mixels(&scales, &mut sink);
-    unused_keys(document, &index, &mut sink);
+    palette::check(document, &index, options, &mut sink);
     sink.finish()
 }
 
@@ -474,82 +504,4 @@ pub(super) fn pixel_position(
         first += layer.layers;
     }
     None
-}
-
-/// `unused_key`: a key, as a palette writes it, that no sprite, frame, tile or
-/// texture ramp uses through that palette or a palette copied from it.
-fn unused_keys(document: &Document, index: &Index, sink: &mut Sink) {
-    let sources = &document.sources;
-    let mut used: HashSet<(&str, char)> = HashSet::new();
-    let mut mark = |palette: &str, key: char| {
-        // The key's color comes from the nearest palette along `from=` that writes it.
-        let mut name = palette;
-        for _ in 0..=sources.defs.len() {
-            let Some(def) = index.get(&(Kind::Palette, name)) else {
-                return;
-            };
-            let Detail::Palette { from, keys } = &def.detail else {
-                return;
-            };
-            if keys.iter().any(|&(k, _)| k == key) {
-                used.insert((def.name.as_str(), key));
-                return;
-            }
-            match from {
-                Some(from) => name = from,
-                None => return,
-            }
-        }
-    };
-    let tiles = document.tilesets.iter().flat_map(|t| &t.tiles);
-    for sprite in document
-        .sprites
-        .iter()
-        .chain(&document.frame_sprites)
-        .chain(tiles)
-    {
-        for key in sprite.keys() {
-            mark(&sprite.palette.name, key);
-        }
-    }
-    for (palette, key) in &sources.palette_uses {
-        mark(palette, *key);
-    }
-    for def in &sources.defs {
-        if let Detail::Texture(ramp) = &def.detail {
-            if let Some(sprite) = document.sprites.iter().find(|s| s.name == def.name) {
-                for &key in ramp {
-                    mark(&sprite.palette.name, key);
-                }
-            }
-        }
-    }
-    for def in &sources.defs {
-        let Detail::Palette { keys, .. } = &def.detail else {
-            continue;
-        };
-        // A palette defined twice is an error; only the first is in the document.
-        if !index
-            .get(&(Kind::Palette, def.name.as_str()))
-            .is_some_and(|first| std::ptr::eq(*first, def))
-        {
-            continue;
-        }
-        for &(key, pos) in keys {
-            if used.contains(&(def.name.as_str(), key)) {
-                continue;
-            }
-            let found = Found {
-                code: LintCode::UnusedKey,
-                kind: Kind::Palette,
-                name: &def.name,
-                position: Some(pos),
-                sprite: None,
-                pixels: Vec::new(),
-            };
-            sink.push(found, || {
-                format!("Nothing uses key `{key}` of palette `{}`", def.name)
-            });
-        }
-    }
 }

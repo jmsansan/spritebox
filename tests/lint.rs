@@ -493,6 +493,145 @@ fn shading_and_scale() {
     );
 }
 
+/// Lines 1 to 14: colors too close, a flat ramp, a made ramp, and a grey ramp in
+/// steps too small.
+const RAMPS: &str = "\
+palette p
+  .  transparent
+  k  #1a1c2c
+  g  #38b764
+  G  #39b865
+  1  #203020
+  2  #406040
+  3  #609060
+  4  #80c080
+  ramp grass 1234
+  ramp skin abcde base=#d08159 shift=20
+  x  #808080
+  y  #848484
+  ramp grey xy
+sprite s 13x1 palette=p lint=allow(too_many_colors)
+  .kgG1234abcde
+sprite t 2x1 palette=p
+  xy
+";
+
+#[test]
+fn palettes_and_ramps() {
+    let found = |options: &LintOptions| -> Vec<(LintCode, usize, usize)> {
+        let doc: Document = RAMPS.parse().unwrap();
+        doc.lint(options)
+            .warnings
+            .into_iter()
+            .map(|w| {
+                let p = w.position.unwrap();
+                (w.code, p.line, p.column)
+            })
+            .collect()
+    };
+    use LintCode::*;
+    // The made ramp, `skin`, turns its hue and steps clearly: nothing to report.
+    assert_eq!(
+        found(&LintOptions::default()),
+        [
+            (NearDuplicateColor, 5, 3),
+            (FlatRamp, 10, 8),
+            (NearDuplicateColor, 13, 3),
+            (LowContrast, 14, 14)
+        ]
+    );
+    let messages: Vec<String> = RAMPS
+        .parse::<Document>()
+        .unwrap()
+        .lint(&LintOptions::default())
+        .warnings
+        .into_iter()
+        .map(|w| w.message)
+        .collect();
+    assert_eq!(
+        messages[0],
+        "Keys `g` and `G` of palette `p` are almost the same color, 0.0030 apart in OKLab; \
+         one would do"
+    );
+    assert_eq!(
+        messages[3],
+        "Keys `x` and `y` of ramp `grey` in palette `p` differ by 0.0134 in lightness, too \
+         little to tell apart"
+    );
+    // The thresholds are options; grey ramps are never flat.
+    let lenient = LintOptions {
+        min_color_distance: 0,
+        min_ramp_step: 0,
+        ..LintOptions::default()
+    };
+    assert_eq!(found(&lenient), [(FlatRamp, 10, 8)]);
+    // Unused keys are not judged as too close: drop `G` from the sprite.
+    let text = RAMPS.replace(".kgG1234abcde", ".kgg1234abcde");
+    let doc: Document = text.parse().unwrap();
+    let lint = doc.lint(&LintOptions::default());
+    assert_eq!(lint.count(NearDuplicateColor), 1);
+    assert_eq!(lint.count(UnusedKey), 1);
+    // A copy's colors count with those it inherits: `a` from `p`, `b` from `q`.
+    let copied = "palette p\n  a #ff0000\npalette q from=p\n  b #fe0000\n\
+                  sprite s 2x1 palette=q\n  ab\n";
+    let doc: Document = copied.parse().unwrap();
+    let w = &doc.lint(&LintOptions::default()).warnings;
+    let summary: Vec<_> = w
+        .iter()
+        .map(|w| (w.code, w.position.unwrap().line))
+        .collect();
+    assert_eq!(summary, [(NearDuplicateColor, 4)]);
+    // An inherited ramp is checked with the colors the copy gives it, and a problem
+    // inherited unchanged is reported once.
+    let ramps = "palette p\n  ramp r abc base=#d08159\npalette q from=p\n  a #d08159\n\
+                 sprite s 3x1 palette=p\n  abc\nsprite t 3x1 palette=q\n  abc\n";
+    let doc: Document = ramps.parse().unwrap();
+    let lint = doc.lint(&LintOptions::default());
+    let summary: Vec<_> = lint
+        .warnings
+        .iter()
+        .map(|w| (w.code, w.position.unwrap().line, w.position.unwrap().column))
+        .collect();
+    // `a` and `b` are now one color in `q`: no step between them, at `b` in the ramp;
+    // and too close, at `q`'s `a`, the later line.
+    assert_eq!(summary, [(LowContrast, 2, 11), (NearDuplicateColor, 4, 3)]);
+    assert!(lint.warnings[0].message.contains("palette `q`"));
+    let same = "palette p\n  ramp r ab\n  a #808080\n  b #848484\npalette q from=p\n\
+                sprite s 2x1 palette=p\n  ab\nsprite t 2x1 palette=q\n  ab\n";
+    let doc: Document = same.parse().unwrap();
+    let lint = doc.lint(&LintOptions::default());
+    assert_eq!(
+        (lint.count(LowContrast), lint.count(NearDuplicateColor)),
+        (1, 1)
+    );
+    // Two copies that change an inherited ramp differently each have their problem,
+    // and each copy's `lint=` allows its own.
+    let two = "palette p\n  ramp r ab\n  a #000000\n  b #ffffff\n\
+               palette q from=p\n  a #808080\n  b #848484\n\
+               palette u from=p\n  a #202020\n  b #242424\n\
+               sprite s 2x1 palette=q\n  ab\nsprite t 2x1 palette=u\n  ab\n";
+    let low = |text: &str| {
+        let doc: Document = text.parse().unwrap();
+        doc.lint(&LintOptions::default()).count(LowContrast)
+    };
+    assert_eq!(low(two), 2);
+    assert_eq!(
+        low(&two.replace(
+            "palette q from=p",
+            "palette q from=p lint=allow(low_contrast)"
+        )),
+        1
+    );
+    // Also when the copies change it the same way: the copy that allows it does not
+    // hide it for the one that does not.
+    let alike = two
+        .replace("#202020", "#808080")
+        .replace("#242424", "#848484");
+    assert_eq!(low(&alike), 1);
+    let allowed = "palette q from=p lint=allow(low_contrast)";
+    assert_eq!(low(&alike.replace("palette q from=p", allowed)), 1);
+}
+
 const SWAPS: &str = "\
 palette base
   .  transparent
@@ -540,9 +679,14 @@ fn unused_keys() {
 fn allowing_warnings() {
     let all = |text: &str| lint(text).len();
     assert_eq!(all(SWAPS), 3);
+    // `lint=` on a palette reaches the palettes copied from it, as on a sprite.
     assert_eq!(
         all(&SWAPS.replace("palette base", "palette base lint=allow(unused_key)")),
-        1
+        0
+    );
+    assert_eq!(
+        all(&SWAPS.replace("palette night", "palette night lint=allow(unused_key)")),
+        2
     );
     assert_eq!(all(&format!("lint allow unused_key\n{SWAPS}")), 0);
     assert_eq!(

@@ -215,6 +215,6 @@ pub use image::{Color, Image};
 pub use limits::Limits;
 pub use lint::{Lint, LintCode, LintOptions, Warning};
 pub use preview::PreviewOptions;
-pub use sprite::{Insets, Palette, Sprite};
+pub use sprite::{Insets, Palette, Ramp, Sprite};
 pub use texture::{Dither, Noise, bayer};
 pub use tiles::{BLOB_MASKS, Piece, Scheme, Terrain, Tilemap, Tileset, neighbours, reduce};

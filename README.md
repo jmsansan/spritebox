@@ -198,6 +198,22 @@ sprite coin 8x8 palette=dawn
 - **`from=OTHER`** starts the palette with the keys and colors of `OTHER`, which
   may be defined anywhere in the file. The palette's own lines replace colors of
   keys it shares and add new keys. Chains of copies are allowed; circles are not.
+- **`ramp NAME KEYS`** names the keys that shade one material, dark to light, as
+  one word, such as `ramp grass abcd`. Lint checks that a ramp's hue turns and its
+  steps can be told apart. A copy keeps the ramps of the palette it copies, unless
+  it writes one of the same name.
+- **`ramp NAME KEYS base=#rrggbb shift=DEGREES`** defines those keys with colors
+  made around the base: lightness in even steps of OKLab L, centred on the base's
+  where it fits; the hue turned toward yellow in the highlights and blue in the
+  shadows, up to `shift` degrees at the ends (default 20, at most 60); and chroma
+  easing toward both ends. Fixed-point arithmetic makes the same colors everywhere.
+
+```text
+palette dawn
+  .  transparent
+  k  #1a1c2c
+  ramp skin abcde base=#d08159        ; #77403a #a35f4b #d08159 #ecae80 #feddbc
+```
 
 ### Sprites
 
@@ -782,6 +798,9 @@ fn review(text: &str) -> spritebox::Result<()> {
 | `banding` | A line one pixel thick, reaching at least `LintOptions::banding_length` (default 4) pixels across or down, of a shade between a lighter and a darker one on its two sides: shading stacked in parallel lines. The outline is not a shade. |
 | `mixel` | A sprite drawn at 2×, 3× or 4× (every run of one color, across and down, a multiple of it) in a document with sprites drawn at 1×. A document drawn at 2× throughout is consistent. |
 | `too_many_colors` | More visible colors than `LintOptions::max_colors_small` (default 8) in a sprite under 32×32, or than `LintOptions::max_colors` (default 16) in any. |
+| `near_duplicate_color` | Two used keys of a palette, alike in alpha, closer than `LintOptions::min_color_distance` (default 0.03) in OKLab: one would do. |
+| `flat_ramp` | A ramp whose hue at its two ends is within 5°: shades that only change in brightness look dull. Grey ramps are never flat. |
+| `low_contrast` | Neighbouring keys of a ramp closer than `LintOptions::min_ramp_step` (default 0.06) in OKLab lightness. |
 | `unused_key` | A palette key that no sprite, frame, tile or texture ramp uses, through that palette or one copied from it. |
 
 The checks of pixels (`orphan_pixel` to `too_many_colors`) look at sprites drawn with a
@@ -791,7 +810,7 @@ point, derived sprites, which repeat their base, and font glyphs, whose dots and
 letterforms break these rules on purpose, are not checked.
 
 Some art breaks a rule on purpose. `lint=allow(CODE,...)` on a definition allows those
-codes for it and for everything built from it; `lint allow CODE...` on a line of its
+codes for it and for everything built from it (sprites made from a sprite, palettes copied from a palette); `lint allow CODE...` on a line of its
 own allows them in its file (not in the files that import it, even for sprites they build from its sprites); and
 `LintOptions::allow`, or `--allow`, everywhere:
 

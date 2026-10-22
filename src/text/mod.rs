@@ -141,6 +141,25 @@ struct PaletteDef<'a> {
     colors: Vec<(char, Color)>,
     /// Where each of `colors` is written.
     positions: Vec<Position>,
+    ramps: Vec<RampDef<'a>>,
+}
+
+/// A `ramp` line of a palette: its name, and its keys as one word.
+struct RampDef<'a> {
+    name: Token<'a>,
+    keys: Token<'a>,
+}
+
+impl RampDef<'_> {
+    /// Each key, at its position.
+    fn keys(&self) -> Vec<(char, Position)> {
+        self.keys
+            .text
+            .chars()
+            .enumerate()
+            .map(|(i, k)| (k, self.keys.at(i)))
+            .collect()
+    }
 }
 
 struct Parser<'a, 'l> {
@@ -260,6 +279,20 @@ fn check_name(token: Token) -> Parsed<()> {
     Ok(())
 }
 
+/// The color of `base=`: opaque, `#rrggbb`.
+fn parse_base(token: Token) -> Parsed<Color> {
+    let invalid = || {
+        token.error(
+            ErrorCode::InvalidArgument,
+            format!("A ramp's base is an opaque `#rrggbb`, not `{}`", token.text),
+        )
+    };
+    if token.text.len() != 7 {
+        return Err(invalid());
+    }
+    token.text.parse().map_err(|_| invalid())
+}
+
 /// A lint code by name, or an error at `pos`.
 fn lint_code(name: &str, pos: Position) -> Parsed<LintCode> {
     if name.is_empty() {
@@ -341,7 +374,14 @@ impl<'a> Parser<'a, '_> {
         self.lint_option(Kind::Palette, name, lint)?;
         let mut colors: Vec<(char, Color)> = Vec::new();
         let mut positions = Vec::new();
+        let mut ramps: Vec<RampDef<'a>> = Vec::new();
         for child in &node.children {
+            if child.keyword() == "ramp" {
+                if let Err(e) = self.ramp(child, name, &mut colors, &mut positions, &mut ramps) {
+                    self.errors.push(e);
+                }
+                continue;
+            }
             match palette_entry(child) {
                 Ok((key, color)) => {
                     // A key with a bad color stays defined, so that its uses are not
@@ -368,7 +408,153 @@ impl<'a> Parser<'a, '_> {
             from,
             colors,
             positions,
+            ramps,
         });
+        Ok(())
+    }
+
+    /// `ramp NAME KEYS`, the keys of one material dark to light; with `base=#rrggbb`
+    /// and `shift=DEGREES`, which defines the keys with colors made around the base.
+    fn ramp(
+        &mut self,
+        node: &Node<'a>,
+        palette: Token<'a>,
+        colors: &mut Vec<(char, Color)>,
+        positions: &mut Vec<Position>,
+        ramps: &mut Vec<RampDef<'a>>,
+    ) -> Parsed<()> {
+        let tokens = &node.line.tokens;
+        let usage = "write `ramp NAME KEYS`, such as `ramp skin abcd`, dark to light";
+        let name = *tokens
+            .get(1)
+            .ok_or_else(|| tokens[0].end_error(format!("Expected a ramp's name; {usage}")))?;
+        check_name(name)?;
+        let keys = *tokens
+            .get(2)
+            .ok_or_else(|| name.end_error(format!("Expected the ramp's keys; {usage}")))?;
+        if keys.text.contains('=') {
+            return Err(keys.error(
+                ErrorCode::Syntax,
+                format!("Expected the ramp's keys before its options; {usage}"),
+            ));
+        }
+        let (mut base, mut shift) = (None, None);
+        for &token in &tokens[3..] {
+            match token.text.split_once('=') {
+                Some(("base", text)) if base.is_none() => {
+                    base = Some(Token {
+                        text,
+                        pos: token.at("base=".len()),
+                    });
+                }
+                Some(("shift", text)) if shift.is_none() => {
+                    shift = Some(Token {
+                        text,
+                        pos: token.at("shift=".len()),
+                    });
+                }
+                _ => {
+                    return Err(token.error(
+                        ErrorCode::Syntax,
+                        format!(
+                            "Unexpected `{}`; a ramp takes `base=#rrggbb` and `shift=DEGREES`",
+                            token.text
+                        ),
+                    ));
+                }
+            }
+        }
+        if let Some(child) = node.children.first() {
+            return Err(child
+                .line
+                .first()
+                .error(ErrorCode::Syntax, "Unexpected indented line under a ramp"));
+        }
+        // A ramp longer than a palette can be is refused before any work on its keys.
+        if keys
+            .text
+            .chars()
+            .nth(self.limits.max_palette_colors)
+            .is_some()
+        {
+            return Err(keys.error(
+                ErrorCode::LimitExceeded,
+                format!(
+                    "Ramp `{}` has more keys than the limit of {} a palette",
+                    name.text, self.limits.max_palette_colors
+                ),
+            ));
+        }
+        let def = RampDef { name, keys };
+        let written = def.keys();
+        if written.len() < 2 {
+            return Err(keys.error(ErrorCode::InvalidArgument, "A ramp has at least two keys"));
+        }
+        for (i, &(key, pos)) in written.iter().enumerate() {
+            if key.is_control() || RESERVED_KEYS.contains(&key) {
+                return Err(Error::at(
+                    pos,
+                    ErrorCode::InvalidArgument,
+                    format!("`{key}` cannot be a palette key"),
+                ));
+            }
+            if written[..i].iter().any(|&(k, _)| k == key) {
+                return Err(Error::at(
+                    pos,
+                    ErrorCode::DuplicateName,
+                    format!("Key `{key}` is twice in ramp `{}`", name.text),
+                ));
+            }
+            if let Some(other) = ramps.iter().find(|r| r.keys.text.contains(key)) {
+                return Err(Error::at(
+                    pos,
+                    ErrorCode::DuplicateName,
+                    format!("Key `{key}` is in ramp `{}` already", other.name.text),
+                ));
+            }
+        }
+        if let Some(first) = ramps.iter().find(|r| r.name.text == name.text) {
+            return Err(duplicate(name, "Ramp", first.name.pos));
+        }
+        if let Some(shift) = shift {
+            if base.is_none() {
+                return Err(Error::at(
+                    shift.pos,
+                    ErrorCode::Syntax,
+                    "`shift=` turns the hues of a ramp made from `base=`; give a base",
+                ));
+            }
+        }
+        if let Some(base) = base {
+            let color = parse_base(base)?;
+            let shift = match shift {
+                Some(t) => t
+                    .text
+                    .parse::<u32>()
+                    .ok()
+                    .filter(|s| *s <= 60 && t.text.bytes().all(|b| b.is_ascii_digit()))
+                    .ok_or_else(|| {
+                        t.error(
+                            ErrorCode::InvalidArgument,
+                            format!("A shift is 0 to 60 degrees, not `{}`", t.text),
+                        )
+                    })?,
+                None => 20,
+            };
+            let made = crate::oklab::ramp(color, written.len(), shift);
+            for (&(key, pos), color) in written.iter().zip(made) {
+                if colors.iter().any(|&(k, _)| k == key) {
+                    return Err(Error::at(
+                        pos,
+                        ErrorCode::DuplicateName,
+                        format!("Key `{key}` is defined twice in palette `{}`", palette.text),
+                    ));
+                }
+                colors.push((key, color));
+                positions.push(pos);
+            }
+        }
+        ramps.push(def);
         Ok(())
     }
 
@@ -451,8 +637,17 @@ impl<'a> Parser<'a, '_> {
                 name: p.name.text.to_owned(),
                 pos: p.name.pos,
                 allow: allow(Kind::Palette, p.name),
-                deps: Vec::new(),
+                deps: p
+                    .from
+                    .iter()
+                    .map(|t| (Kind::Palette, t.text.to_owned()))
+                    .collect(),
                 detail: Detail::Palette {
+                    ramps: p
+                        .ramps
+                        .iter()
+                        .map(|r| (r.name.text.to_owned(), r.name.pos, r.keys()))
+                        .collect(),
                     from: p.from.map(|t| t.text.to_owned()),
                     keys: p
                         .colors
@@ -469,7 +664,11 @@ impl<'a> Parser<'a, '_> {
                 name: s.name.text.to_owned(),
                 pos: s.name.pos,
                 allow: allow(Kind::Sprite, s.name),
-                deps: s.dependencies().iter().map(|t| t.text.to_owned()).collect(),
+                deps: s
+                    .dependencies()
+                    .iter()
+                    .map(|t| (Kind::Sprite, t.text.to_owned()))
+                    .collect(),
                 detail: s.detail(self.layer_counts.get(&s.name.pos)),
             });
         }
@@ -635,11 +834,59 @@ impl<'a> Parser<'a, '_> {
                     }
                     break;
                 }
-                let mut colors = base.take().map(|p| p.colors).unwrap_or_default();
+                let (mut colors, mut ramps) =
+                    base.take().map(|p| (p.colors, p.ramps)).unwrap_or_default();
                 for &(key, color) in &def.colors {
                     match colors.iter_mut().find(|(k, _)| *k == key) {
                         Some(entry) => entry.1 = color,
                         None => colors.push((key, color)),
+                    }
+                }
+                // A ramp of the palette copied is replaced by one of the same name;
+                // the others keep their keys, which no ramp written here may share.
+                let replaced: Vec<&str> = def.ramps.iter().map(|r| r.name.text).collect();
+                for ramp in &def.ramps {
+                    let keys = ramp.keys();
+                    let shared = keys.iter().find_map(|&(key, pos)| {
+                        ramps
+                            .iter()
+                            .filter(|r| !replaced.contains(&r.name.as_str()))
+                            .find(|r| r.keys.contains(&key))
+                            .map(|r| (key, pos, r.name.clone()))
+                    });
+                    if let Some((key, pos, other)) = shared {
+                        self.errors.push(Error::at(
+                            pos,
+                            ErrorCode::DuplicateName,
+                            format!(
+                                "Key `{key}` is in ramp `{other}` already, which palette `{}` \
+                                 copies",
+                                def.name.text
+                            ),
+                        ));
+                        continue;
+                    }
+                    let missing = keys
+                        .iter()
+                        .find(|(k, _)| !colors.iter().any(|(c, _)| c == k));
+                    if let Some(&(key, pos)) = missing {
+                        self.errors.push(Error::at(
+                            pos,
+                            ErrorCode::UnknownName,
+                            format!(
+                                "Key `{key}` of ramp `{}` is not in palette `{}`",
+                                ramp.name.text, def.name.text
+                            ),
+                        ));
+                        continue;
+                    }
+                    let made = crate::Ramp {
+                        name: ramp.name.text.to_owned(),
+                        keys: keys.iter().map(|&(k, _)| k).collect(),
+                    };
+                    match ramps.iter_mut().find(|r| r.name == made.name) {
+                        Some(old) => *old = made,
+                        None => ramps.push(made),
                     }
                 }
                 if colors.len() > self.limits.max_palette_colors {
@@ -660,6 +907,7 @@ impl<'a> Parser<'a, '_> {
                 let palette = Palette {
                     name: def.name.text.to_owned(),
                     colors,
+                    ramps,
                 };
                 resolved[i] = Some(palette.clone());
                 depth[i] = level;
