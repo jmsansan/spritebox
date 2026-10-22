@@ -11,6 +11,9 @@
   `unused_key`. `lint=allow(CODE,...)` on any definition and `lint allow CODE...` in
   a file allow codes on purpose; `--strict` and `--deny` make warnings fail.
   `Limits::max_warnings` bounds the warnings kept, not the counts.
+- Lint checks for line work (#22): `jaggy` (uneven steps along a silhouette),
+  `double_outline` (outlines two pixels thick at L corners) and `stray_alpha` (lone
+  translucent pixels left from smoothing).
 - The command-line tool's JSON diagnostics have a `severity`, `error` or `warning`.
 
 ### Changed

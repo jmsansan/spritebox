@@ -1,11 +1,13 @@
 //! Lint: warnings for art that is valid but does not follow pixel-art practice.
 
+mod lines;
+
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::fmt;
 use std::str::FromStr;
 
-use crate::{Color, Document, Error, ErrorCode, Limits, Position, Sprite};
+use crate::{Document, Error, ErrorCode, Limits, Position, Sprite};
 
 /// Stable lint categories. Match on the code rather than the message.
 ///
@@ -17,18 +19,34 @@ pub enum LintCode {
     /// A lone pixel on a flat area, close in lightness to the color around it, which
     /// reads as noise; or an opaque pixel that touches nothing at all.
     OrphanPixel,
+    /// Steps along a silhouette's edge whose lengths jump, such as `1, 1, 3, 1, 1`,
+    /// where a clean line keeps one length or changes it gradually.
+    Jaggy,
+    /// An outline two pixels thick at an L corner, where one diagonal step would do.
+    DoubleOutline,
+    /// A lone translucent pixel in an otherwise opaque sprite: a leftover of smoothing.
+    StrayAlpha,
     /// A palette key that nothing uses.
     UnusedKey,
 }
 
 impl LintCode {
     /// Every code, in order.
-    pub const ALL: [LintCode; 2] = [LintCode::OrphanPixel, LintCode::UnusedKey];
+    pub const ALL: [LintCode; 5] = [
+        LintCode::OrphanPixel,
+        LintCode::Jaggy,
+        LintCode::DoubleOutline,
+        LintCode::StrayAlpha,
+        LintCode::UnusedKey,
+    ];
 
     /// The code's stable name in `snake_case`, such as `"orphan_pixel"`.
     pub fn as_str(self) -> &'static str {
         match self {
             LintCode::OrphanPixel => "orphan_pixel",
+            LintCode::Jaggy => "jaggy",
+            LintCode::DoubleOutline => "double_outline",
+            LintCode::StrayAlpha => "stray_alpha",
             LintCode::UnusedKey => "unused_key",
         }
     }
@@ -244,7 +262,7 @@ impl Sources {
 
 /// Collects warnings: drops those allowed, counts the rest, and keeps only the first
 /// `limit` in order, so that memory stays bounded however many there are.
-struct Sink<'s> {
+pub(super) struct Sink<'s> {
     sources: &'s Sources,
     index: Index<'s>,
     options: &'s LintOptions,
@@ -281,7 +299,7 @@ impl Ord for Kept {
 }
 
 /// A warning about to be reported, built only if it is kept.
-struct Found<'f> {
+pub(super) struct Found<'f> {
     code: LintCode,
     /// The definition whose `lint=` can allow it.
     kind: Kind,
@@ -305,7 +323,7 @@ impl<'s> Sink<'s> {
         }
     }
 
-    fn push(&mut self, found: Found, message: impl FnOnce() -> String) {
+    pub(super) fn push(&mut self, found: Found, message: impl FnOnce() -> String) {
         let code = found.code;
         if self.options.allow.contains(&code) {
             return;
@@ -384,102 +402,21 @@ pub(crate) fn run(document: &Document, options: &LintOptions, limits: &Limits) -
             continue;
         };
         if let Detail::Drawn(layers) = &def.detail {
-            orphan_pixels(sprite, def, layers, options, &mut sink);
+            lines::check(sprite, def, layers, options, &mut sink);
         }
     }
     unused_keys(document, &index, &mut sink);
     sink.finish()
 }
 
-/// Lightness, 0..=255, by the luma of Rec. 601.
-fn luma(c: Color) -> i32 {
-    (299 * c.r as i32 + 587 * c.g as i32 + 114 * c.b as i32) / 1000
-}
-
-/// `orphan_pixel`: in a sprite of at least 3×3 with a size, a visible pixel whose four
-/// neighbours share one other color, close to its own in lightness, with none of its
-/// color touching it diagonally. A visible pixel with nothing visible around it at
-/// all is reported too.
-fn orphan_pixels(
-    sprite: &Sprite,
-    def: &Def,
-    layers: &[DrawnLayer],
-    options: &LintOptions,
-    sink: &mut Sink,
-) {
-    let (w, h) = (sprite.width as i64, sprite.height as i64);
-    if w < 3 || h < 3 {
-        return;
-    }
-    let image = sprite.render();
-    // All fully transparent pixels are one color.
-    let at = |x: i64, y: i64| -> Color {
-        if x < 0 || y < 0 || x >= w || y >= h {
-            return Color::TRANSPARENT;
-        }
-        let c = image
-            .pixel(x as u32, y as u32)
-            .unwrap_or(Color::TRANSPARENT);
-        if c.a == 0 { Color::TRANSPARENT } else { c }
-    };
-    for y in 0..h {
-        for x in 0..w {
-            let c = at(x, y);
-            if c.a == 0 {
-                continue;
-            }
-            let sides = [at(x - 1, y), at(x + 1, y), at(x, y - 1), at(x, y + 1)];
-            let corners = [
-                at(x - 1, y - 1),
-                at(x + 1, y - 1),
-                at(x - 1, y + 1),
-                at(x + 1, y + 1),
-            ];
-            let around = sides[0];
-            if sides.iter().any(|&s| s != around) || around == c {
-                continue;
-            }
-            let isolated = around.a == 0;
-            if isolated {
-                if corners.iter().any(|k| k.a > 0) {
-                    continue;
-                }
-            } else {
-                let contrast = (luma(c) - luma(around)).abs();
-                if corners.contains(&c) || contrast > options.orphan_contrast as i32 {
-                    continue;
-                }
-            }
-            let (x, y) = (x as u32, y as u32);
-            let found = Found {
-                code: LintCode::OrphanPixel,
-                kind: Kind::Sprite,
-                name: &sprite.name,
-                position: Some(pixel_position(sprite, layers, x, y).unwrap_or(def.pos)),
-                sprite: Some(&sprite.name),
-                pixels: vec![(x, y)],
-            };
-            sink.push(found, || {
-                if isolated {
-                    format!(
-                        "A lone pixel in sprite `{}` at ({x}, {y}), touching nothing",
-                        sprite.name
-                    )
-                } else {
-                    format!(
-                        "A lone pixel in sprite `{}` at ({x}, {y}), close in lightness to the \
-                         color around it, reads as noise",
-                        sprite.name
-                    )
-                }
-            });
-        }
-    }
-}
-
 /// The character in the text that draws pixel `(x, y)`, when the layer seen there is
 /// written as rows; `None` when it comes from another sprite.
-fn pixel_position(sprite: &Sprite, layers: &[DrawnLayer], x: u32, y: u32) -> Option<Position> {
+pub(super) fn pixel_position(
+    sprite: &Sprite,
+    layers: &[DrawnLayer],
+    x: u32,
+    y: u32,
+) -> Option<Position> {
     let seen = sprite.top_layer(x, y)?;
     let mut first = 0;
     for layer in layers {

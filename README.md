@@ -774,8 +774,16 @@ fn review(text: &str) -> spritebox::Result<()> {
 
 | Code | Reports |
 | --- | --- |
-| `orphan_pixel` | A lone pixel on a flat area, within `LintOptions::orphan_contrast` (default 32 of 255) in lightness of the color around it: noise rather than a detail. Higher-contrast lone pixels, such as eyes and glints, are taken as deliberate. Also an opaque pixel touching nothing at all. Checked in drawn sprites of at least 3×3; not in textures, whose noise is the point, nor again in derived sprites. |
+| `orphan_pixel` | A lone pixel on a flat area, within `LintOptions::orphan_contrast` (default 32 of 255) in lightness of the color around it: noise rather than a detail. Higher-contrast lone pixels, such as eyes and glints, are taken as deliberate. Also an opaque pixel touching nothing at all. |
+| `jaggy` | Uneven steps along a sprite's silhouette: a step at least two pixels longer, or shorter, than the steps on both sides of it, as in `1, 1, 3, 1, 1`. Steady lines (`2, 2, 2`), alternating ones (`2, 1, 2, 1`) and curves (`1, 2, 3`) are clean, and so are the first and last steps of a stretch, which corners cut short. Steep sides are measured down the rows. |
+| `double_outline` | An outline two pixels thick at an L corner, where one diagonal step would do. The outline is the key of at least half the silhouette's pixels; square corners, lines meeting lines, and lines two pixels thick throughout are taken as deliberate. Each corner is taken out in turn, so what is reported is what to erase. |
+| `stray_alpha` | A lone translucent pixel, with no translucent pixel around it, in a sprite whose translucent pixels are fewer than one in eight: a leftover of smoothing, which blurs when the sprite is scaled. Translucent areas, such as glass, are left alone. |
 | `unused_key` | A palette key that no sprite, frame, tile or texture ramp uses, through that palette or one copied from it. |
+
+The checks of pixels (`orphan_pixel` to `stray_alpha`) look at sprites drawn with a size,
+of at least 3×3, as they are seen with their layers. Textures, whose noise is the
+point, derived sprites, which repeat their base, and font glyphs, whose dots and
+letterforms break these rules on purpose, are not checked.
 
 Some art breaks a rule on purpose. `lint=allow(CODE,...)` on a definition allows those
 codes for it and for everything built from it; `lint allow CODE...` on a line of its
