@@ -24,6 +24,14 @@ a whole file at a glance. People read and edit the same files, and diffs show wh
 pixels changed. It is a sibling of [audiobox](https://github.com/jmsansan/audiobox-rs),
 which does the same for game audio.
 
+![Night Shift: an original rainy city with an animated elevated train, neon signs and a ramen stall](docs/night-shift.gif)
+
+**Night Shift** — an original 480 × 300 pixel-art scene, presented at 3× with
+96 frames in a four-second loop. Rain, puddle ripples, steam and train reflections
+are rendered with spritebox. See the [Rust generator](examples/night_shift.rs),
+[editable sprites](examples/night_shift/night_shift.spritebox) and
+[reproduction instructions](examples/night_shift/README.md).
+
 ## Capabilities
 
 | Capability | Status |
