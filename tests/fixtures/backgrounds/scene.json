@@ -1,0 +1,68 @@
+{
+  "format": "spritebox",
+  "version": 1,
+  "atlas": {
+    "image": "atlas.png",
+    "size": [3, 3],
+    "padding": 1,
+    "sprites": {
+      "dot": [1, 1, 1, 1]
+    },
+    "panels": {}
+  },
+  "animations": {},
+  "groups": {},
+  "tilesets": {},
+  "tilemaps": {},
+  "fonts": {},
+  "backgrounds": {
+    "schema": 1,
+    "units": "pixel",
+    "items": [
+      {
+        "name": "scene",
+        "size": [8, 6],
+        "flat": {
+          "image": "background-0000.png",
+          "camera": [-3, 1]
+        },
+        "layers": [
+          {
+            "name": "sky",
+            "image": "background-0000-layer-0000.png",
+            "size": [8, 6],
+            "origin": [0, 0],
+            "repeat": "none",
+            "parallax": {
+              "x": {
+                "num": 0,
+                "den": 1
+              },
+              "y": {
+                "num": 0,
+                "den": 1
+              }
+            }
+          },
+          {
+            "name": "hills",
+            "image": "background-0000-layer-0001.png",
+            "size": [8, 6],
+            "origin": [-1, 0],
+            "repeat": "x",
+            "parallax": {
+              "x": {
+                "num": 1,
+                "den": 3
+              },
+              "y": {
+                "num": 0,
+                "den": 1
+              }
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -7,6 +7,7 @@ mod group;
 mod import;
 mod lettering;
 mod lex;
+mod scenes;
 mod screen;
 mod sprite;
 mod texture;
@@ -21,13 +22,48 @@ use crate::{Color, Document, Error, ErrorCode, Limits, LintCode, Palette, Positi
 use animation::AnimationDef;
 use import::Files;
 pub(crate) use import::Loader;
+pub(crate) fn scene_chain_name(source: &str, limits: &Limits) -> crate::Result<String> {
+    Ok(chain::parse(
+        lex::Token {
+            text: source,
+            pos: Position::new(1, 1),
+        },
+        limits,
+    )?
+    .canonical())
+}
+pub(crate) fn scene_chain(
+    source: &str,
+    doc: &Document,
+    limits: &Limits,
+    budget: &mut crate::scene::Budget,
+) -> crate::Result<(String, Sprite)> {
+    let chain = chain::parse(
+        lex::Token {
+            text: source,
+            pos: Position::new(1, 1),
+        },
+        limits,
+    )?;
+    let sprite = doc
+        .sprite(chain.base.text)
+        .ok_or_else(|| Error::new(ErrorCode::UnknownName, "Unknown background sprite"))?;
+    let sprite = chain.apply_scene(
+        sprite,
+        &doc.palettes,
+        limits,
+        &mut chain::PaletteUses::new(),
+        budget,
+    )?;
+    Ok((chain.canonical(), sprite))
+}
 use lex::{Node, Token};
 use sprite::SpriteDef;
 use tiles::{TilemapDef, TilesetDef};
 
 /// The directives that start a definition.
 const DIRECTIVES: &str = "`import`, `palette`, `sprite`, `texture`, `animation`, `tileset`, \
-    `tilemap`, `font`, `text`, `states`, `icons`, `theme`, `screen`, `group` or `lint`";
+    `tilemap`, `font`, `text`, `states`, `icons`, `theme`, `screen`, `surface`, `background`, `group` or `lint`";
 
 /// Parses `text`, loading the files it imports through `loader`. Returns the
 /// document, complete when there are no errors, and the errors ordered by file, then
@@ -101,6 +137,9 @@ pub(crate) fn parse(
         definitions_seen: 0,
         themes: Vec::new(),
         screens: Vec::new(),
+        surfaces: Vec::new(),
+        backgrounds: Vec::new(),
+        scene_budget: crate::scene::Budget::new(limits),
     };
     // Imported definitions take the place of their `import`.
     let mut walk = Walk {
@@ -203,6 +242,9 @@ impl RampDef<'_> {
 }
 
 struct Parser<'a, 'l> {
+    surfaces: Vec<scenes::SurfaceDef<'a>>,
+    backgrounds: Vec<scenes::BackgroundDef<'a>>,
+    scene_budget: crate::scene::Budget,
     screens: Vec<screen::ScreenDef<'a>>,
     themes: Vec<themes::ThemeDef<'a>>,
     generated_names: &'a HashMap<Position, String>,
@@ -415,6 +457,8 @@ impl<'a> Parser<'a, '_> {
             "icons" => self.icons(node),
             "theme" => self.theme(node),
             "screen" => self.screen(node),
+            "surface" => self.surface(node),
+            "background" => self.background(node),
             "texture" => self.texture(node),
             "lint" => self.lint(node),
             "group" => self.group(node),
@@ -700,6 +744,21 @@ impl<'a> Parser<'a, '_> {
                 .collect()
         };
         let mut defs = Vec::new();
+        for (kind, name) in self
+            .surfaces
+            .iter()
+            .map(|d| (Kind::Surface, d.name))
+            .chain(self.backgrounds.iter().map(|d| (Kind::Background, d.name)))
+        {
+            defs.push(Def {
+                kind,
+                name: name.text.into(),
+                pos: name.pos,
+                allow: allow(kind, name),
+                deps: Vec::new(),
+                detail: Detail::Other,
+            });
+        }
         for screen in &self.screens {
             defs.push(Def {
                 kind: Kind::Screen,
@@ -821,7 +880,9 @@ impl<'a> Parser<'a, '_> {
         let groups = self.resolve_groups(&sprites);
         let (states, icon_sets) = self.resolve_widgets(&sprites);
         let screens = self.resolve_screens(&palettes, &sprites, &mut budget);
-        Document {
+        let mut doc = Document {
+            surfaces: Vec::new(),
+            backgrounds: Vec::new(),
             screens,
             theme_bases: palettes.clone(),
             themes,
@@ -836,7 +897,9 @@ impl<'a> Parser<'a, '_> {
             states,
             icon_sets,
             sources: Sources::default(),
-        }
+        };
+        self.resolve_scenes(&mut doc);
+        doc
     }
 
     /// Keeps the sprites whose pixels fit in `budget`, and reports the first that does

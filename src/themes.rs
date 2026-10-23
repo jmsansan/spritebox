@@ -26,6 +26,7 @@ impl Theme {
 /// Additional images for a theme. All use the base export's region metadata.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ThemeExport {
+    pub backgrounds: Vec<crate::BackgroundExport>,
     pub name: String,
     pub file: String,
     pub image: Image,
@@ -63,6 +64,11 @@ impl Document {
 
     pub(crate) fn recolor_palettes(&mut self) {
         let palettes = &self.palettes;
+        for surface in &mut self.surfaces {
+            if let Some(p) = palettes.iter().find(|p| p.name == surface.palette.name) {
+                surface.palette = p.clone();
+            }
+        }
         let apply = |sprite: &mut Sprite| {
             if let Some(p) = palettes.iter().find(|p| p.name == sprite.palette.name) {
                 sprite.palette = p.clone();
@@ -97,28 +103,40 @@ impl Document {
         options: &ExportOptions,
         limits: &Limits,
     ) -> Result<Export> {
+        crate::export::preflight_paths(self, options, limits, true)?;
         let mut base = self.clone();
         if !self.themes.is_empty() {
             base.palettes = self.theme_bases.clone();
             base.recolor_palettes();
         }
         let copies = self.themes.len() as u64 + 1;
-        let mut result = crate::export::build_copies(&base, options, limits, copies)?;
-        for theme in &self.themes {
-            let themed = self.with_theme(&theme.name)?.export_with(options, limits)?;
+        let mut budget = crate::scene::Budget::new(limits);
+        budget.pixels(base.scene_storage())?;
+        let mut result = crate::export::build_copies(&base, options, limits, copies, &mut budget)?;
+        for (theme_index, theme) in self.themes.iter().enumerate() {
+            let themed_doc = self.with_theme(&theme.name)?;
+            let themed = crate::export::build_copies(&themed_doc, options, limits, 1, &mut budget)?;
+            let mut backgrounds = themed.backgrounds;
+            crate::background_export::rename_themed(&mut backgrounds, theme_index);
             let mut tilesets = themed.tilesets;
             for tileset in &mut tilesets {
                 tileset.file = format!("tileset-{}-{}.png", tileset.name, theme.name);
             }
             result.themes.push(ThemeExport {
+                backgrounds,
                 name: theme.name.clone(),
                 file: format!("atlas-{}.png", theme.name),
                 image: themed.atlas.image,
                 tilesets,
             });
         }
+        result.scene_work = limits.max_scene_work - budget.work;
         let mut names = std::collections::HashSet::new();
-        for (name, _) in result.files() {
+        let paths = result.file_names();
+        if paths.len() > limits.max_export_files {
+            return Err(Error::limit("More than the export file limit"));
+        }
+        for name in paths {
             if !names.insert(name.to_ascii_lowercase()) {
                 return Err(Error::invalid(format!(
                     "Themed output filenames collide at `{name}`"

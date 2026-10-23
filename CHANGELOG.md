@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.5.0
+
+### Added
+
+- Finite backgrounds with ordered native layers, mixed-palette sprite/surface/map
+  sources, crop, anchors and native clipping. Backgrounds and surfaces remain
+  outside sprite atlases (#42).
+- Exact rational camera parallax with mathematical floor and Euclidean repetition,
+  including negative origins/cameras and transparent repeat margins (#43).
+- Immutable palette-key surfaces, typed builders, and aliased rectangle, line,
+  polygon and ellipse painting with documented coverage/overwrite rules (#44).
+- Banded and Bayer-dithered gradients that select authored keys without RGB
+  interpolation; all geometry remains stable across themes and alpha changes (#45).
+- Reusable wrapped-noise profiles and a specified FNV-1a/SplitMix64 named seed
+  contract, with pinned seed, height and placement vectors (#46).
+- Exact-count/density weighted sprite scatter with raw-key masks, profile
+  baselines, wrapped spacing and finite attempt/work budgets (#47).
+- Flat/native layer PNG export, stable ordinal filenames and optional version-1
+  background metadata for exact integer-alpha reconstruction, including themes (#48).
+- CLI `--background`, `--camera`, `--background-mode`, bounded camera-aware
+  thumbnails and positioned `background_clipped` lint (#49).
+- Complete harbor/day/night and static Night Shift examples, background reference
+  documentation, exact output fixtures and cross-feature compatibility tests (#50).
+
+### Changed
+
+- Add `Limits::{max_scene_commands,max_scene_pixels,max_scene_work,max_scatter_attempts}`;
+  scene work/storage is shared through generators, transformed sources, layers,
+  themes and CLI preview/export. Temporary buffers and platform byte limits are checked.
+- `ExportOptions` and `PreviewOptions` add background options; `ThemeExport` adds
+  background images. Use `..Default::default()` in option struct literals.
+- `Export::file_names` supports complete collision/file-count preflight without
+  encoding images. Legacy documents retain existing metadata and golden pixels.
+- Preserve Rust 1.85, safe Rust, zero production dependencies and in-memory WASM.
+
 ## 0.4.1
 
 ### Changed

@@ -209,6 +209,22 @@ fn ramp_source<'d>(
 /// it, texture ramps, and steps of chains.
 fn direct_uses(document: &Document) -> HashMap<&str, HashSet<char>> {
     let mut uses: HashMap<&str, HashSet<char>> = HashMap::new();
+    for surface in &document.surfaces {
+        uses.entry(surface.palette.name())
+            .or_default()
+            .extend(&surface.used_keys);
+    }
+    for source in document
+        .backgrounds
+        .iter()
+        .flat_map(|b| &b.layers)
+        .flat_map(|l| &l.items)
+        .filter_map(|p| p.sprite.as_ref())
+    {
+        uses.entry(source.palette.name())
+            .or_default()
+            .extend(source.keys());
+    }
     let tiles = document.tilesets.iter().flat_map(|t| &t.tiles);
     for sprite in document
         .sprites

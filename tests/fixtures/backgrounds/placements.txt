@@ -1,0 +1,4 @@
+Surface("ground") (0, 0)
+Sprite("dot") (2, 0)
+Sprite("dot") (4, 1)
+Sprite("dot") (7, 2)

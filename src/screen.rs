@@ -84,14 +84,14 @@ impl Document {
 impl Image {
     /// Draw source-over at signed coordinates, clipping to this image.
     pub fn over_from(&mut self, source: &Image, x: i64, y: i64) {
-        let left = x.max(0);
-        let top = y.max(0);
-        let right = x
-            .saturating_add(source.width() as i64)
-            .min(self.width() as i64);
-        let bottom = y
-            .saturating_add(source.height() as i64)
-            .min(self.height() as i64);
+        let (left, top, right, bottom) = placement_bounds(
+            self.width(),
+            self.height(),
+            source.width(),
+            source.height(),
+            x,
+            y,
+        );
         for ty in top..bottom {
             for tx in left..right {
                 let color = source.pixel((tx - x) as u32, (ty - y) as u32).unwrap();
@@ -121,4 +121,21 @@ impl Image {
         }
         Ok(image)
     }
+}
+
+pub(crate) fn placement_bounds(
+    width: u32,
+    height: u32,
+    source_width: u32,
+    source_height: u32,
+    x: i64,
+    y: i64,
+) -> (i64, i64, i64, i64) {
+    (
+        x.clamp(0, width as i64),
+        y.clamp(0, height as i64),
+        x.saturating_add(source_width as i64).clamp(0, width as i64),
+        y.saturating_add(source_height as i64)
+            .clamp(0, height as i64),
+    )
 }

@@ -1,0 +1,27 @@
+palette p
+  a #16263c
+  b #8b7b7280
+  c #e8cf98
+  . transparent
+surface sky 8x6
+  gradient g axis=y mode=blend dither=bayer2
+    stop 0 a
+    stop 5 c
+  ellipse moon at=5,0 size=2x2 key=c
+surface ground 8x6 seed=9
+  profile ridge key=b baseline=6 amplitude=3 cell=4 octaves=2 roughness=60 seed=3
+sprite dot 1x1
+  c
+screen hud 3x1 palette=p background=a
+  dot at 1,0
+background scene 8x6 seed=11
+  layer sky 8x6 parallax=0/1,0/1
+    place surface sky at=0,0
+  layer hills 8x6 at=-1,0 repeat=x parallax=1/3,0/1
+    place surface ground at=0,0
+    scatter stars count=3 attempts=32 seed=4
+      variant dot weight=2
+      variant dot:flip_x weight=1
+theme night of p
+  c #b3c6ef
+  b #8b7b7200

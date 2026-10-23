@@ -41,6 +41,9 @@ Options:
   --preview     Explicitly request the preview already included by directory render.
   --screen <n>  Render one screen; --out names a PNG file instead of a directory.
   --theme <n>   Apply a theme to render or lint; render accepts all for shared metadata.
+  --background <n> Select one background; ordinary assets are still exported.
+  --camera <x,y> Signed background camera pixels (default 0,0); directory render only.
+  --background-mode <m> none|flat|layers|both (default both); directory render only.
   --max-side <n> The largest side of a texture, 1..=8192 (default 2048).
   --font <name> The font to write, when the file has several.
   --family <n>  The family name in the TrueType file (default: the font's name).
@@ -59,6 +62,7 @@ const EXIT_USAGE: u8 = 2;
 const EXIT_IO: u8 = 3;
 
 struct Options {
+    backgrounds: spritebox::BackgroundExportOptions,
     screen: Option<String>,
     theme: Option<String>,
     command: String,
@@ -100,6 +104,8 @@ fn main() -> ExitCode {
 fn parse_args(args: &[String]) -> Result<Options, String> {
     let mut iter = args.iter();
     let mut screen = None;
+    let mut backgrounds = spritebox::BackgroundExportOptions::default();
+    let mut background_flags = std::collections::HashSet::new();
     let mut theme = None;
     let mut scale_given = false;
     let mut preview = false;
@@ -120,6 +126,31 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
     let mut deny = Vec::new();
     while let Some(arg) = iter.next() {
         match arg.as_str() {
+            "--background" | "--camera" | "--background-mode" => {
+                if !background_flags.insert(arg.clone()) {
+                    return Err(format!("{arg} may appear only once"));
+                }
+                let value = iter.next().ok_or(format!("{arg} needs a value"))?;
+                match arg.as_str() {
+                    "--background" => backgrounds.selection = Some(value.clone()),
+                    "--camera" => {
+                        let (x, y) = value.split_once(',').ok_or("--camera needs signed X,Y")?;
+                        backgrounds.camera = (
+                            x.parse().map_err(|_| "Invalid camera x")?,
+                            y.parse().map_err(|_| "Invalid camera y")?,
+                        );
+                    }
+                    _ => {
+                        backgrounds.mode = match value.as_str() {
+                            "none" => spritebox::BackgroundMode::None,
+                            "flat" => spritebox::BackgroundMode::Flat,
+                            "layers" => spritebox::BackgroundMode::Layers,
+                            "both" => spritebox::BackgroundMode::Both,
+                            _ => return Err("--background-mode needs none|flat|layers|both".into()),
+                        }
+                    }
+                }
+            }
             "--json" => json = true,
             "--strict" => strict = true,
             "--allow" | "--deny" => {
@@ -180,6 +211,9 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
         }
     }
     let file = file.ok_or("missing <file>")?;
+    if !background_flags.is_empty() && (command != "render" || screen.is_some()) {
+        return Err("Background options need directory rendering without --screen".into());
+    }
     if command == "render" && out.is_none() {
         return Err("render needs --out <dir>".into());
     }
@@ -218,6 +252,7 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
         scale = 1;
     }
     Ok(Options {
+        backgrounds,
         screen,
         theme,
         command,
@@ -393,30 +428,53 @@ fn render(
     // Everything is made before anything is written.
     let export_options = ExportOptions {
         atlas: options.atlas.clone(),
+        backgrounds: options.backgrounds.clone(),
     };
     let export = if options.theme.as_deref() == Some("all") {
         document.export_all_themes_with(&export_options, limits)?
     } else {
         document.export_with(&export_options, limits)?
     };
+    let mut preview_limits = limits.clone();
+    if !document.backgrounds().is_empty() || !document.surfaces().is_empty() {
+        preview_limits.max_scene_pixels = preview_limits
+            .max_scene_pixels
+            .checked_sub(export.image_pixels())
+            .ok_or_else(|| {
+                Error::new(
+                    ErrorCode::LimitExceeded,
+                    "Export and preview exceed scene storage",
+                )
+            })?;
+        preview_limits.max_scene_work = preview_limits
+            .max_scene_work
+            .checked_sub(export.scene_work())
+            .ok_or_else(|| {
+                Error::new(
+                    ErrorCode::LimitExceeded,
+                    "Export and preview exceed scene work",
+                )
+            })?;
+    }
     let preview = document.preview_with(
         &PreviewOptions {
+            backgrounds: options.backgrounds.clone(),
             scale: options.scale,
             lint: options.lint,
             ..PreviewOptions::default()
         },
-        limits,
+        &preview_limits,
     )?;
-    let mut files = export.files();
-    files.push(("preview.png".to_owned(), png::encode(&preview)));
+    let mut planned = export.file_names();
+    planned.push("preview.png".into());
     let mut names = std::collections::HashSet::new();
-    if files.len() > limits.max_export_files {
+    if planned.len() > limits.max_export_files {
         return Err(Error::new(
             ErrorCode::LimitExceeded,
             "More than the export file limit",
         ));
     }
-    for (name, _) in &files {
+    for name in &planned {
         if !names.insert(name.to_ascii_lowercase()) {
             return Err(Error::new(
                 ErrorCode::InvalidArgument,
@@ -424,6 +482,8 @@ fn render(
             ));
         }
     }
+    let mut files = export.files();
+    files.push(("preview.png".into(), png::encode(&preview)));
     let io = |path: &Path, e: std::io::Error| {
         Error::new(
             ErrorCode::Io,

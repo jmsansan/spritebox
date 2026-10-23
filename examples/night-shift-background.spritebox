@@ -1,0 +1,29 @@
+; Static declarative companion to examples/night_shift.rs, not its animation.
+palette city
+  s #0a1526
+  h #263653
+  m #b6c6d4
+  b #111d30
+  r #693b69
+  n #f57ca7
+  w #e6bd8d
+surface skyline 480x300 palette=city
+  gradient sky axis=y mode=bands
+    stop 0 s
+    stop 150 h
+  ellipse moon at=374,26 size=34x34 key=m
+  rect left at=0,82 size=92x218 key=b
+  rect center at=117,119 size=109x181 key=b
+  rect right at=262,91 size=137x209 key=b
+  polygon roof key=r points=250,91 330,59 410,91
+  rect neon at=281,116 size=72x17 key=n
+  rect inner at=285,120 size=64x9 key=r
+  line mast from=165,65 to=165,119 key=b
+  rect window1 at=18,116 size=13x19 key=w
+  rect window2 at=53,116 size=13x19 key=w
+  rect window3 at=18,159 size=13x19 key=w
+  rect window4 at=53,159 size=13x19 key=w
+  rect railway at=0,220 size=480x9 key=r
+background night_shift 480x300
+  layer city 480x300 repeat=x parallax=1/2,0/1
+    place surface skyline at=0,0

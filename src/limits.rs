@@ -39,6 +39,14 @@ pub struct Limits {
     pub max_export_files: usize,
     /// Placements in one screen. Default 1024.
     pub max_screen_items: usize,
+    /// Authored scene operations and list records. Default 4096.
+    pub max_scene_commands: usize,
+    /// Retained scene cells, profile entries, placements and operation images. Default 16 Mi.
+    pub max_scene_pixels: u64,
+    /// Raster samples, edge tests, noise octaves and scatter work per operation. Default 64 Mi.
+    pub max_scene_work: u64,
+    /// Candidate attempts across all scatter groups in a document. Default 1,000,000.
+    pub max_scatter_attempts: u64,
     /// Depth of definitions built on other definitions: palettes copied `from=`
     /// another, and sprites derived from sprites. Default 32.
     pub max_nesting: usize,
@@ -68,6 +76,10 @@ impl Default for Limits {
             max_kerning_pairs: 4096,
             max_export_files: 8192,
             max_screen_items: 1024,
+            max_scene_commands: 4096,
+            max_scene_pixels: 16 * 1024 * 1024,
+            max_scene_work: 64 * 1024 * 1024,
+            max_scatter_attempts: 1_000_000,
             max_nesting: 32,
             max_image_side: 8192,
             max_image_pixels: 16 * 1024 * 1024,

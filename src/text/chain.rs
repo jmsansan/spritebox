@@ -31,6 +31,91 @@ pub(crate) struct Chain<'a> {
 }
 
 impl<'a> Chain<'a> {
+    /// Preflight every scene transformation, including its temporary key buffers.
+    /// Effects charge a conservative 16 work units per source/output key cell.
+    pub fn apply_scene(
+        &self,
+        base: &Sprite,
+        palettes: &[Palette],
+        limits: &Limits,
+        uses: &mut PaletteUses,
+        budget: &mut crate::scene::Budget,
+    ) -> Parsed<Sprite> {
+        let (mut w, mut h, mut layers) = (base.width, base.height, base.layers.len());
+        let cells = |w: u32, h: u32, l: usize| w as u64 * h as u64 * l as u64;
+        let mut peak = cells(w, h, layers);
+        let mut work = peak;
+        for (_, op) in &self.ops {
+            let image_cells = w as u64 * h as u64;
+            let old = cells(w, h, layers);
+            let add = |v: u32, n: u32| {
+                v.checked_add(n).ok_or_else(|| {
+                    self.base
+                        .error(ErrorCode::LimitExceeded, "Scene chain size overflow")
+                })
+            };
+            match op {
+                Op::Rotate(q) if q % 2 == 1 => (w, h) = (h, w),
+                Op::Pad(n) => {
+                    let n = n.checked_mul(2).ok_or_else(|| {
+                        self.base
+                            .error(ErrorCode::LimitExceeded, "Scene chain padding overflow")
+                    })?;
+                    w = add(w, n)?;
+                    h = add(h, n)?;
+                }
+                Op::Size(a, b, _) => {
+                    w = *a;
+                    h = *b;
+                }
+                Op::Outline(_) => {
+                    layers = layers.checked_add(1).ok_or_else(|| {
+                        self.base
+                            .error(ErrorCode::LimitExceeded, "Scene chain layers overflow")
+                    })?
+                }
+                Op::Shadow(_, x, y, _) => {
+                    w = add(w, x.unsigned_abs())?;
+                    h = add(h, y.unsigned_abs())?;
+                    layers = layers.checked_add(1).ok_or_else(|| {
+                        self.base
+                            .error(ErrorCode::LimitExceeded, "Scene chain layers overflow")
+                    })?;
+                }
+                _ => {}
+            }
+            base.effect_size(w, h, layers, limits)
+                .map_err(|e| self.base.error(e.code, e.message))?;
+            let step = old.checked_add(cells(w, h, layers)).ok_or_else(|| {
+                self.base
+                    .error(ErrorCode::LimitExceeded, "Scene chain storage overflow")
+            })?;
+            let temporary = if matches!(op, Op::Outline(_) | Op::Shadow(..)) {
+                image_cells
+            } else {
+                0
+            };
+            peak = peak.max(step.checked_add(temporary).ok_or_else(|| {
+                self.base
+                    .error(ErrorCode::LimitExceeded, "Scene effect temporary overflow")
+            })?);
+            work = work
+                .checked_add(step.checked_mul(16).ok_or_else(|| {
+                    self.base
+                        .error(ErrorCode::LimitExceeded, "Scene chain work overflow")
+                })?)
+                .ok_or_else(|| {
+                    self.base
+                        .error(ErrorCode::LimitExceeded, "Scene chain work overflow")
+                })?;
+        }
+        budget
+            .ensure_pixels(peak)
+            .and_then(|_| budget.work(work))
+            .and_then(|_| budget.pixels(cells(w, h, layers)))
+            .map_err(|e| self.base.error(e.code, e.message))?;
+        self.apply(base, palettes, limits, uses)
+    }
     /// The chain written without spaces, which names the sprite it builds.
     pub fn canonical(&self) -> String {
         let mut name = self.base.text.to_owned();

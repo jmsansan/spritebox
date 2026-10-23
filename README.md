@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 **A Rust library and command-line tool for creating 2D pixel art and game assets
-from plain text: sprites, sprite sheets, tilemaps, procedural textures, game UI
+from plain text: sprites, layered backgrounds with parallax, tilemaps, procedural textures, game UI
 and pixel fonts. Export PNG images, packed sprite atlases with JSON metadata,
 TrueType fonts and preview sheets. Safe Rust, zero dependencies and deterministic
 output, with WebAssembly support.**
@@ -72,12 +72,13 @@ are rendered with spritebox. See the [Rust generator](examples/night_shift.rs),
 | Palette ramps, declared or made with hue shifting; groups of sprites | Available |
 | Resizable nine/three-slice panels, shadows and static text with kerning | Available |
 | Widget states, fixed-grid icon sets, themes and composed UI screens | Available |
+| Layered backgrounds, key surfaces, gradients, noise profiles, scatter and rational parallax | Available |
 
 ## Install
 
 ```toml
 [dependencies]
-spritebox = "0.4"
+spritebox = "0.5"
 ```
 
 Rust 1.85 or newer. The command-line tool installs with
@@ -699,6 +700,30 @@ OKLab lightness difference of 2500/10000 (0.25). Theme-aware lint uses
 `lint FILE --theme dark --strict`. Screen diagnostics retain item positions and
 imported filenames, and accept ordinary lint suppression.
 
+## Backgrounds
+
+Describe finite static scenes with palette-key surfaces and ordered native layers.
+Paint rectangles, lines, polygons, ellipses, banded/Bayer gradients and reusable
+noise profiles. Place sprites, textures and cropped tilemaps, or scatter weighted
+sprite variants along a terrain profile. Themes recolor retained keys without
+moving generated geometry or placements.
+
+![Background generated from text](docs/backgrounds.png)
+
+Camera movement uses exact signed rational parallax and repeat seams. Export a
+flattened PNG, native layer PNGs, or both, with metadata for exact reconstruction.
+Backgrounds stay outside sprite atlases; their PNGs retain native dimensions.
+
+```sh
+spritebox render examples/backgrounds.spritebox --out out/backgrounds --theme all
+spritebox render examples/backgrounds.spritebox --out out/camera --background harbor --camera -64,0 --background-mode both
+```
+
+See [the background reference](docs/backgrounds.md) for grammar, Rust builders,
+coverage rules, seed vectors, resource budgets and the reconstruction schema.
+The [static Night Shift companion](examples/night-shift-background.spritebox)
+extracts representative geometry; the original animated Rust example is preserved.
+
 ## Output
 
 **RGBA8.** Every `Image` the crate makes, from `Sprite::render` to the atlas, is
@@ -1060,13 +1085,17 @@ hand-written files and untrusted input; raise them for trusted input.
 | `max_definitions` | 4096 |
 | `max_palette_colors` | 256 keys |
 | `max_sprite_side` | 1024 pixels |
-| `max_layers` | 16 layers in a sprite |
+| `max_layers` | 16 layers in a sprite or background |
 | `max_frames` | 1024 frames in an animation |
 | `max_tiles` | 4096 tiles in a tileset, terrain variants included |
 | `max_map_side` | 1024 tiles |
 | `max_glyphs` | 4096 glyphs in a font |
 | `max_kerning_pairs` | 4096 kerning pairs in a font |
 | `max_screen_items` | 1024 placements in a screen |
+| `max_scene_commands` | 4096 scene operations and list records |
+| `max_scene_pixels` | 16 Mi retained scene cells and operation images |
+| `max_scene_work` | 64 Mi scene work units per parse/render/export |
+| `max_scatter_attempts` | 1,000,000 candidate attempts per document generation |
 | `max_export_files` | 8192 files, including theme variants |
 | `max_nesting` | 32 levels of palettes copied `from=` others, or of sprites derived from sprites |
 | `max_image_side` | 8192 pixels, for any image created or decoded |

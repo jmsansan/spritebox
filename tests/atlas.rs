@@ -345,6 +345,7 @@ fn tileset_textures_are_padded_and_extruded() {
     let doc: Document = include_str!("../examples/tiles.spritebox").parse().unwrap();
     for (padding, extrude) in [(0, true), (1, true), (2, false)] {
         let options = spritebox::ExportOptions {
+            backgrounds: Default::default(),
             atlas: AtlasOptions {
                 padding,
                 extrude,
@@ -420,6 +421,7 @@ fn art_too_large_for_the_bound_is_an_error() {
     // Tileset textures obey the bound too.
     let tiles: Document = include_str!("../examples/tiles.spritebox").parse().unwrap();
     let export = spritebox::ExportOptions {
+        backgrounds: Default::default(),
         atlas: AtlasOptions {
             max_side: 64,
             ..AtlasOptions::default()
