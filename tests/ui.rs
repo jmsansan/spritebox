@@ -213,13 +213,18 @@ fn text_sprite_layout_chains_and_kerning() {
     assert_eq!(doc.sprite("layered").unwrap().render(), label.render());
     assert!(doc.sprite("outlined").unwrap().width() > label.width());
     assert_eq!(doc.font("hud").unwrap().kern('A', 'V'), -1);
-    let no_kern = Document::parse(
-        &include_str!("fixtures/ui-text.spritebox")
-            .replace("  kern AV -1\n", "")
-            .replace("sprite layered 5x3", "sprite layered 6x3"),
-    )
-    .unwrap();
-    assert_eq!(no_kern.sprite("label").unwrap().width(), 6);
+    for ending in ["\n", "\r\n"] {
+        let source = include_str!("fixtures/ui-text.spritebox")
+            .replace("\r\n", "\n")
+            .replace('\n', ending);
+        let no_kern = Document::parse(
+            &source
+                .replace("  kern AV -1", "")
+                .replace("sprite layered 5x3", "sprite layered 6x3"),
+        )
+        .unwrap();
+        assert_eq!(no_kern.sprite("label").unwrap().width(), 6);
+    }
     let bytes = doc
         .font("hud")
         .unwrap()
