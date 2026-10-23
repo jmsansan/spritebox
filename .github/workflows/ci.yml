@@ -51,7 +51,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: sudo apt-get update && sudo apt-get install -y ffmpeg fontconfig
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg fontconfig libfreetype6-dev
+      - run: cargo run --locked --manifest-path scripts/ab-glyph-check/Cargo.toml
+      - run: cargo run --locked --offline -- font tests/fixtures/ui-text.spritebox --font hud --out out/kerning.ttf
+      - run: cc scripts/check-font-kern.c $(pkg-config --cflags --libs freetype2) -o out/check-font-kern && out/check-font-kern out/kerning.ttf
       - run: cargo test --locked --offline --test png --test font
         env:
           SPRITEBOX_FFMPEG_TESTS: '1'

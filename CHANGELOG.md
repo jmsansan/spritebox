@@ -1,5 +1,49 @@
 # Changelog
 
+## 0.4.0
+
+UI building blocks, composed and previewed at their real pixel sizes.
+
+### Added
+
+- Resizable nine-slice and three-slice panels (#27): `:size(WxH)` stretches with
+  nearest-neighbour sampling; `:size(WxH,tile)` repeats edges and centres. Corners
+  and insets survive resizing and transforms. `Fill`, `Sprite::resize` and
+  `resize_with` are public.
+- Palette-key text sprites (#28): `text NAME font=FONT color=KEY`, optional width,
+  alignment and line height, literal leading spaces and Unicode glyph escapes.
+  Fonts accept kerning pairs; rendering and optional TrueType format-0 `kern`
+  export share them. `TextOptions`, `Align`, `KernPair` and font sprite APIs are public.
+- Hard and long silhouette shadows (#29), including translucent palette colors,
+  canvas growth and adjusted panel insets. `Shadow` and sprite shadow APIs are public.
+- Widget states (#30): `normal` is mandatory and first; state sprites use dotted
+  names, matching dimensions and panel insets, and `atlas.states` metadata.
+- Fixed-grid icon sets (#31), with hard outline/margin validation, named preview
+  strips, set lint, and `atlas.icon_sets` metadata.
+- Named palette themes (#32), `Document::with_theme`, all-theme atlas/tileset
+  export, and shared region metadata. Palette-key deduplication keeps the atlas
+  layout stable when theme colors or alpha change.
+- Fixed-position screens (#33), independent of the atlas, sprite-chain placement,
+  clipped integer source-over rendering, 1x/2x/3x previews, and CLI `--screen` PNGs.
+- Screen lint: `screen_bounds`, `off_grid`, optional `screen_overlap`, and text
+  `low_contrast` against its composed backing. Theme selection works with lint.
+- `examples/ui.spritebox` and `docs/ui-preview.png`: title/pause screens, button and
+  checkbox states, six icons, and light/dark colors.
+- Independent ab_glyph and FreeType checks of exported kerning in CI.
+
+### Changed
+
+- `Limits` adds `max_kerning_pairs`, `max_screen_items` and `max_export_files`;
+  themed image exports share an aggregate pixel budget, checked before tile image
+  construction. Screen storage joins the document's aggregate pixel budget.
+- Growing modifier chains check layer and pixel bounds before allocation.
+- Image allocation checks also enforce the platform's addressable byte limit.
+- `LintOptions` adds `screen_overlap` and `min_text_contrast`; struct literals
+  should use `..LintOptions::default()` when keeping default thresholds.
+- JSON format version remains 1: new optional metadata members are additive.
+- Existing fonts without kerning and documents without UI features retain their
+  previous rendering, preview and metadata fixtures.
+
 ## 0.3.0
 
 Lint: sixteen checks for the signs of careless pixel art, each with its line and

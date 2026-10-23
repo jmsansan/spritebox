@@ -2,6 +2,7 @@
 
 mod lines;
 mod palette;
+mod screens;
 mod sets;
 mod shading;
 
@@ -57,11 +58,17 @@ pub enum LintCode {
     InconsistentScale,
     /// A palette key that nothing uses.
     UnusedKey,
+    /// An item falls partly outside its screen.
+    ScreenBounds,
+    /// Opaque pixels from multiple screen items overlap. Opt-in.
+    ScreenOverlap,
+    /// An item is not aligned to its screen's declared grid.
+    OffGrid,
 }
 
 impl LintCode {
     /// Every code, in order.
-    pub const ALL: [LintCode; 16] = [
+    pub const ALL: [LintCode; 19] = [
         LintCode::OrphanPixel,
         LintCode::Jaggy,
         LintCode::DoubleOutline,
@@ -78,6 +85,9 @@ impl LintCode {
         LintCode::FlatRamp,
         LintCode::LowContrast,
         LintCode::UnusedKey,
+        LintCode::ScreenBounds,
+        LintCode::ScreenOverlap,
+        LintCode::OffGrid,
     ];
 
     /// The code's stable name in `snake_case`, such as `"orphan_pixel"`.
@@ -99,6 +109,9 @@ impl LintCode {
             LintCode::FlatRamp => "flat_ramp",
             LintCode::LowContrast => "low_contrast",
             LintCode::UnusedKey => "unused_key",
+            LintCode::ScreenBounds => "screen_bounds",
+            LintCode::ScreenOverlap => "screen_overlap",
+            LintCode::OffGrid => "off_grid",
         }
     }
 }
@@ -194,6 +207,11 @@ impl Lint {
 /// What [`Document::lint`] checks.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LintOptions {
+    /// Check opaque screen item overlaps. Default false.
+    pub screen_overlap: bool,
+    /// Minimum text/background OKLab lightness difference, in ten-thousandths.
+    /// Default 2500 (0.25).
+    pub min_text_contrast: u32,
     /// Codes that are not reported, besides those the text allows.
     pub allow: Vec<LintCode>,
     /// The largest difference in lightness, 0..=255, between a lone pixel and the
@@ -220,6 +238,8 @@ pub struct LintOptions {
 impl Default for LintOptions {
     fn default() -> Self {
         Self {
+            screen_overlap: false,
+            min_text_contrast: 2500,
             allow: Vec::new(),
             orphan_contrast: 32,
             pillow_offset: 10,
@@ -242,6 +262,9 @@ pub(crate) enum Kind {
     Tilemap,
     Font,
     Group,
+    States,
+    Icons,
+    Screen,
 }
 
 /// Where definitions are in the text, and what lint they allow: what a [`Document`]
@@ -542,6 +565,7 @@ pub(crate) fn run(document: &Document, options: &LintOptions, limits: &Limits) -
     shading::mixels(&scales, &mut sink);
     sets::check(document, &index, &mut sink);
     palette::check(document, &index, options, &mut sink);
+    screens::check(document, options, limits, &mut sink);
     sink.finish()
 }
 

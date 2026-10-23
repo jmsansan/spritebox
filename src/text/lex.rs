@@ -24,9 +24,10 @@ impl<'a> Token<'a> {
 }
 
 /// A line with at least one word; blank lines and comments are dropped.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct Line<'a> {
     pub indent: usize,
+    pub raw: &'a str,
     pub tokens: Vec<Token<'a>>,
 }
 
@@ -37,7 +38,7 @@ impl<'a> Line<'a> {
 }
 
 /// A line and the more indented lines under it.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct Node<'a> {
     pub line: Line<'a>,
     pub children: Vec<Node<'a>>,
@@ -59,6 +60,30 @@ pub(crate) fn lex<'a>(text: &'a str, file: u32, errors: &mut Vec<Error>) -> Vec<
     for (index, raw) in text.split('\n').enumerate() {
         let number = index + 1;
         let raw = raw.strip_suffix('\r').unwrap_or(raw);
+        // Text bodies are literal lines: extra indentation belongs to the text,
+        // and an indented blank line contributes one line of vertical space.
+        if stack.last().is_some_and(|n| n.keyword() == "text") {
+            let indent = raw.chars().take_while(|c| *c == ' ').count();
+            if indent > stack.last().unwrap().line.indent {
+                let line = lex_line(raw, file, number, errors).or_else(|| {
+                    raw.trim().is_empty().then(|| Line {
+                        indent,
+                        raw,
+                        tokens: vec![Token {
+                            text: "",
+                            pos: Position::in_file(file, number, indent + 1),
+                        }],
+                    })
+                });
+                if let Some(line) = line {
+                    stack.last_mut().unwrap().children.push(Node {
+                        line,
+                        children: Vec::new(),
+                    });
+                }
+                continue;
+            }
+        }
         let Some(line) = lex_line(raw, file, number, errors) else {
             continue;
         };
@@ -175,7 +200,11 @@ fn lex_line<'a>(
     if tokens.is_empty() {
         return None;
     }
-    Some(Line { indent, tokens })
+    Some(Line {
+        indent,
+        raw: content,
+        tokens,
+    })
 }
 
 #[cfg(test)]

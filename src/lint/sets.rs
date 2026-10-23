@@ -72,6 +72,8 @@ pub(super) fn check(document: &Document, index: &Index, sink: &mut Sink) {
         let what = match set.kind {
             Kind::Animation => "animation",
             Kind::Tileset => "tileset",
+            Kind::States => "state set",
+            Kind::Icons => "icon set",
             _ => "group",
         };
         let report = |sink: &mut Sink, code, i: usize, message: String| {

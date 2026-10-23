@@ -1,0 +1,173 @@
+; A static UI kit: render with --theme dark, or --theme all for both atlases.
+; The font is shared with the standalone font example.
+import font.spritebox
+
+palette ui
+  . transparent
+  k #243645
+  b #adc3cf
+  f #edf5f5
+  g #7e9ba8
+  a #2868c4
+  i #eec76c
+  u #68929f
+  s #10182060
+
+palette disabled from=ui
+  b #bac1c5
+  f #d4dadd
+  g #909ca3
+
+theme dark of ui
+  k #dce9ef
+  b #365265
+  f #172d3a
+  g #0d202c
+  a #69c3ef
+  i #e1a854
+  u #091722
+  s #00000080
+
+; Compact panel corners intentionally use joined outline pixels.
+sprite panel 5x5 palette=ui slice=2 lint=allow(double_outline)
+  .kkk.
+  kbbbk
+  kfffk
+  kgggk
+  .kkk.
+sprite dialog = panel:size(160x152):shadow(s,2,2)
+sprite button_frame = panel:size(112x22)
+
+; Hover/focus add a deliberate accent to the normal corner outline.
+states button lint=allow(inconsistent_outline)
+  normal button_frame
+  hover button_frame:outline(a)
+  pressed button_frame:flip_y
+  disabled button_frame:swap(disabled)
+  focus button_frame:outline(i)
+
+sprite check_frame 5x5 palette=ui lint=allow(double_outline)
+  .kkk.
+  kfffk
+  kfffk
+  kfffk
+  .kkk.
+; The tiny check deliberately joins several accent pixels at its bend.
+sprite check_mark 5x5 palette=ui lint=allow(jaggy,double_outline)
+  .....
+  ...a.
+  .aaa.
+  ..a..
+  .....
+sprite checked 5x5 palette=ui
+  layer frame = check_frame
+  layer mark = check_mark
+states checkbox lint=allow(inconsistent_outline)
+  normal check_frame
+  off check_frame
+  on checked
+  off_hover check_frame:outline(a)
+  on_hover checked:outline(a)
+
+; At 8px these compact symbols deliberately use short diagonal steps.
+icons items 8x8 palette=ui outline=k margin=1 lint=allow(jaggy,double_outline)
+  icon sword
+    ........
+    ....kk..
+    ...kik..
+    ..kikk..
+    .kik....
+    ..kkk...
+    ..k.k...
+    ........
+  ; The accent pixel is an intentional gem, including in the dark theme.
+  icon shield lint=allow(orphan_pixel)
+    ........
+    ..kkkk..
+    .kiiiik.
+    .kiaiik.
+    ..kiik..
+    ...kk...
+    ........
+    ........
+  icon heart
+    ........
+    ..k.k...
+    .kikik..
+    ..kiik..
+    ...kk...
+    ........
+    ........
+    ........
+  icon key
+    ........
+    ..kkk...
+    .kiiik..
+    .kikik..
+    ..kkk...
+    ...k....
+    ...kk...
+    ........
+  icon potion
+    ........
+    ...kk...
+    ..kiik..
+    ...kk...
+    ..kiik..
+    .kiaaik.
+    ..kkkk..
+    ........
+  icon coin
+    ........
+    ..kkkk..
+    .kiiiik.
+    .kiaaik.
+    .kiaaik.
+    .kiiiik.
+    ..kkkk..
+    ........
+
+text title font=hud palette=ui color=k width=144 align=center
+  SPRITEBOX
+text pause font=hud palette=ui color=k width=144 align=center
+  PAUSED
+text start font=hud palette=ui color=k width=112 align=center
+  START GAME
+text options font=hud palette=ui color=k width=112 align=center
+  OPTIONS
+text resume font=hud palette=ui color=k width=112 align=center
+  RESUME
+text exit font=hud palette=ui color=k width=112 align=center
+  EXIT
+text sound font=hud palette=ui color=k
+  SOUND
+text footer font=hud palette=ui color=k width=144 align=center
+  PIXEL UI / 0.4
+
+screen title 320x180 palette=ui background=u grid=2
+  dialog at 80,14
+  title at 88,24
+  button.hover at 104,54
+  start at 104,60
+  button.normal at 104,84
+  options at 104,90
+  checkbox.on at 104,116
+  sound at 116,110
+  items.sword at 104,132
+  items.shield at 124,132
+  items.heart at 144,132
+  items.key at 164,132
+  items.potion at 184,132
+  items.coin at 204,132
+  footer at 88,148
+
+screen pause 320x180 palette=ui background=u grid=2
+  dialog at 80,14
+  pause at 88,24
+  button.focus at 104,54
+  resume at 104,60
+  button.normal at 104,84
+  options at 104,90
+  button.disabled at 104,114
+  exit:swap(disabled) at 104,120
+  footer at 88,148

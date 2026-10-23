@@ -4,6 +4,15 @@
 use ab_glyph::{Font as _, FontRef, PxScale, ScaleFont as _};
 
 fn main() {
+    let kern_text=include_str!("../../../tests/fixtures/ui-text.spritebox");
+    let kern_doc=spritebox::Document::parse(kern_text).unwrap();
+    let kern_font=kern_doc.font("hud").unwrap();
+    let kern_bytes=kern_font.to_ttf(&Default::default()).unwrap();
+    let kern_ab=FontRef::try_from_slice(&kern_bytes).unwrap();
+    for k in 1..=3 {
+        let scaled=kern_ab.as_scaled(PxScale::from((kern_font.height()*k) as f32));
+        assert_eq!(scaled.kern(kern_ab.glyph_id('A'),kern_ab.glyph_id('V')),-(k as f32));
+    }
     let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/font.spritebox")).unwrap();
     let doc = spritebox::Document::parse(&text).unwrap();
     let font = doc.font("hud").unwrap();

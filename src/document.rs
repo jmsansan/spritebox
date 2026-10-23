@@ -104,6 +104,11 @@ impl Group {
 /// ```
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Document {
+    pub(crate) screens: Vec<crate::Screen>,
+    pub(crate) themes: Vec<crate::Theme>,
+    pub(crate) theme_bases: Vec<Palette>,
+    pub(crate) states: Vec<crate::StateSet>,
+    pub(crate) icon_sets: Vec<crate::IconSet>,
     pub(crate) palettes: Vec<Palette>,
     pub(crate) sprites: Vec<Sprite>,
     pub(crate) frame_sprites: Vec<Sprite>,

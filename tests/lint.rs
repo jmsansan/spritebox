@@ -1089,7 +1089,7 @@ fn codes_have_stable_names() {
 }
 
 #[test]
-fn every_check_before_and_after() {
+fn every_sprite_check_before_and_after() {
     // examples/lint.spritebox names a definition CHECK_before for each check, which
     // it reports, and CHECK_after, which it does not; nothing else is reported.
     let text = include_str!("../examples/lint.spritebox").replace("\r\n", "\n");
@@ -1121,8 +1121,18 @@ fn every_check_before_and_after() {
         reported.push(w.code);
     }
     reported.dedup();
-    assert_eq!(reported.len(), LintCode::ALL.len(), "{reported:?}");
-    for code in LintCode::ALL {
+    // Spatial screen rules have triggering and clean cases in tests/ui.rs.
+    let codes: Vec<_> = LintCode::ALL
+        .into_iter()
+        .filter(|c| {
+            !matches!(
+                c,
+                LintCode::ScreenBounds | LintCode::ScreenOverlap | LintCode::OffGrid
+            )
+        })
+        .collect();
+    assert_eq!(reported.len(), codes.len(), "{reported:?}");
+    for code in codes {
         let before = format!("{}_before", code.as_str());
         let after = format!("{}_after", code.as_str());
         assert!(defs.iter().any(|&(_, n)| n == before), "{before}");

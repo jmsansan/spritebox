@@ -198,7 +198,11 @@ pub(crate) fn assemble(pieces: &[Sprite; 5], scheme: Scheme, mask: u8, name: Str
         palette: first.palette.clone(),
         layers: out
             .into_iter()
-            .map(|keys| Layer { name: None, keys })
+            .map(|keys| Layer {
+                text: false,
+                name: None,
+                keys,
+            })
             .collect(),
         slice: None,
     }

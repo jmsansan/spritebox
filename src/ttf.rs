@@ -70,7 +70,7 @@ pub(crate) fn write(font: &Font, options: &TtfOptions) -> Result<Vec<u8>> {
         });
     }
     let family = options.family.clone().unwrap_or_else(|| font.name.clone());
-    let tables = [
+    let mut tables = vec![
         (*b"OS/2", os2(font, &outlines, u)),
         (*b"cmap", cmap(&font.glyphs)),
         (*b"glyf", Vec::new()),
@@ -82,6 +82,10 @@ pub(crate) fn write(font: &Font, options: &TtfOptions) -> Result<Vec<u8>> {
         (*b"name", name(&family, options.version)),
         (*b"post", post(&outlines, u)),
     ];
+    if !font.kerning.is_empty() {
+        tables.push((*b"kern", kern(font, u)?));
+        tables.sort_by_key(|(tag, _)| *tag);
+    }
     let (glyf, loca) = glyf_and_loca(&outlines);
     let head = head(font, &outlines, u, options.version);
     let tables: Vec<([u8; 4], Vec<u8>)> = tables
@@ -124,6 +128,55 @@ fn assemble(tables: Vec<([u8; 4], Vec<u8>)>) -> Vec<u8> {
     let adjustment = 0xb1b0_afbau32.wrapping_sub(checksum(&out));
     out[head_offset + 8..head_offset + 12].copy_from_slice(&adjustment.to_be_bytes());
     out
+}
+
+fn kern(font: &Font, units: i32) -> Result<Vec<u8>> {
+    let mut pairs = Vec::new();
+    for pair in &font.kerning {
+        let left = font
+            .glyphs
+            .iter()
+            .position(|g| g.ch == pair.left)
+            .ok_or_else(|| Error::new(ErrorCode::EncodeError, "Unknown left kerning glyph"))?
+            + 1;
+        let right = font
+            .glyphs
+            .iter()
+            .position(|g| g.ch == pair.right)
+            .ok_or_else(|| Error::new(ErrorCode::EncodeError, "Unknown right kerning glyph"))?
+            + 1;
+        let value = pair.adjustment as i64 * units as i64;
+        if !(i16::MIN as i64..=i16::MAX as i64).contains(&value) {
+            return Err(Error::new(
+                ErrorCode::EncodeError,
+                "Kerning exceeds TrueType coordinates",
+            ));
+        }
+        pairs.push((left as u16, right as u16, value as i32));
+    }
+    pairs.sort_by_key(|&(l, r, _)| (l, r));
+    if pairs.len() > (u16::MAX as usize - 14) / 6 {
+        return Err(Error::new(
+            ErrorCode::EncodeError,
+            "Too many kerning pairs for a format-0 kern table",
+        ));
+    }
+    let n = pairs.len() as u16;
+    let power = 1u16 << (15 - n.leading_zeros() as u16);
+    let mut w = Writer(Vec::new());
+    w.u16(0)
+        .u16(1)
+        .u16(0)
+        .u16(14 + 6 * n)
+        .u16(1)
+        .u16(n)
+        .u16(6 * power)
+        .u16(power.trailing_zeros() as u16)
+        .u16(6 * n - 6 * power);
+    for (l, r, v) in pairs {
+        w.u16(l).u16(r).i16(v);
+    }
+    Ok(w.0)
 }
 
 /// The sum of a table's big-endian 32-bit words, padded with zeros.

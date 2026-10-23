@@ -159,6 +159,53 @@ pub(crate) fn sheet(
                 .collect(),
         });
     }
+    if !document.icon_sets.is_empty() {
+        sections.push(Section {
+            title: "Icon sets".into(),
+            groups: document
+                .icon_sets
+                .iter()
+                .map(|set| Group {
+                    label: set.name().into(),
+                    items: set
+                        .members()
+                        .iter()
+                        .filter_map(|name| document.sprite(name))
+                        .map(|s| Item::new(s.render(), s.name.clone()))
+                        .collect(),
+                })
+                .collect(),
+        });
+    }
+    if !document.screens.is_empty() {
+        let pixels: u64 = document
+            .screens
+            .iter()
+            .map(|s| s.width as u64 * s.height as u64 * 3)
+            .sum();
+        if pixels > limits.max_image_pixels {
+            return Err(crate::Error::limit(
+                "Screen preview images exceed the aggregate pixel limit",
+            ));
+        }
+        let mut groups = Vec::new();
+        for screen in &document.screens {
+            let image = screen.render(document, limits)?;
+            groups.push(Group {
+                label: screen.name.clone(),
+                items: (1..=3)
+                    .map(|scale| Item {
+                        scale: Some(scale),
+                        ..Item::new(image.clone(), format!("{scale}x"))
+                    })
+                    .collect(),
+            });
+        }
+        sections.push(Section {
+            title: "Screens".into(),
+            groups,
+        });
+    }
     if !document.tilesets.is_empty() {
         sections.push(Section {
             title: "Tilesets".into(),

@@ -247,6 +247,7 @@ impl<'a> Parser<'a, '_> {
                 height: noise.height,
                 palette: palette.clone(),
                 layers: vec![Layer {
+                    text: false,
                     name: None,
                     keys: pixels,
                 }],

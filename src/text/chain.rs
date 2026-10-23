@@ -2,12 +2,12 @@
 //! `coin:flip_x:swap(dusk):outline(k)`.
 
 use super::lex::Token;
-use super::{Parsed, RESERVED_KEYS, check_name};
-use crate::{Error, ErrorCode, Limits, Palette, Sprite};
+use super::{Parsed, RESERVED_KEYS, check_name, check_sprite_name};
+use crate::{Error, ErrorCode, Fill, Limits, Palette, Shadow, Sprite};
 
 /// The modifiers, for error messages.
 pub(crate) const MODIFIERS: &str = "`flip_x`, `flip_y`, `rot90`, `rot180`, `rot270`, \
-    `offset(dx,dy)`, `pad(n)`, `swap(palette)` or `outline(key)`";
+    `offset(dx,dy)`, `pad(n)`, `swap(palette)`, `outline(key)`, `size(WxH)` or `shadow(key,dx,dy)`";
 
 #[derive(Clone, Debug)]
 pub(crate) enum Op<'a> {
@@ -19,6 +19,8 @@ pub(crate) enum Op<'a> {
     Pad(u32),
     Swap(Token<'a>),
     Outline(char),
+    Size(u32, u32, Fill),
+    Shadow(char, i32, i32, Shadow),
 }
 
 #[derive(Clone, Debug)]
@@ -42,6 +44,14 @@ impl<'a> Chain<'a> {
                 Op::Pad(n) => name.push_str(&format!("pad({n})")),
                 Op::Swap(p) => name.push_str(&format!("swap({})", p.text)),
                 Op::Outline(k) => name.push_str(&format!("outline({k})")),
+                Op::Size(w, h, fill) => name.push_str(&format!(
+                    "size({w}x{h}{})",
+                    if *fill == Fill::Tile { ",tile" } else { "" }
+                )),
+                Op::Shadow(k, x, y, mode) => name.push_str(&format!(
+                    "shadow({k},{x},{y}{})",
+                    if *mode == Shadow::Long { ",long" } else { "" }
+                )),
             }
         }
         name
@@ -79,8 +89,43 @@ impl<'a> Chain<'a> {
         limits: &Limits,
         uses: &mut PaletteUses,
     ) -> Parsed<Sprite> {
+        sprite
+            .effect_size(sprite.width, sprite.height, sprite.layers.len(), limits)
+            .map_err(|e| self.base.error(e.code, e.message))?;
         let mut sprite = sprite.clone();
         for (token, op) in &self.ops {
+            let (mut w, mut h, mut layers) = (sprite.width, sprite.height, sprite.layers.len());
+            match op {
+                Op::Outline(_) => layers += 1,
+                Op::Pad(n) => {
+                    let twice = n
+                        .checked_mul(2)
+                        .ok_or_else(|| token.error(ErrorCode::LimitExceeded, "Padding overflow"))?;
+                    w = w.checked_add(twice).ok_or_else(|| {
+                        token.error(ErrorCode::LimitExceeded, "Padding width overflow")
+                    })?;
+                    h = h.checked_add(twice).ok_or_else(|| {
+                        token.error(ErrorCode::LimitExceeded, "Padding height overflow")
+                    })?;
+                }
+                Op::Size(width, height, _) => {
+                    w = *width;
+                    h = *height;
+                }
+                Op::Shadow(_, x, y, _) => {
+                    w = w.checked_add(x.unsigned_abs()).ok_or_else(|| {
+                        token.error(ErrorCode::LimitExceeded, "Shadow width overflow")
+                    })?;
+                    h = h.checked_add(y.unsigned_abs()).ok_or_else(|| {
+                        token.error(ErrorCode::LimitExceeded, "Shadow height overflow")
+                    })?;
+                    layers += 1;
+                }
+                _ => {}
+            }
+            sprite
+                .effect_size(w, h, layers, limits)
+                .map_err(|e| token.error(e.code, e.message))?;
             for key in sprite.keys() {
                 uses.insert((sprite.palette.name.clone(), key));
             }
@@ -109,6 +154,12 @@ impl<'a> Chain<'a> {
                 }
                 Op::Outline(key) => sprite
                     .outline(*key)
+                    .map_err(|e| token.error(e.code, e.message))?,
+                Op::Size(w, h, fill) => sprite
+                    .resize_with(*w, *h, *fill, limits)
+                    .map_err(|e| token.error(e.code, e.message))?,
+                Op::Shadow(k, x, y, mode) => sprite
+                    .shadow_with(*k, *x, *y, *mode, limits)
                     .map_err(|e| token.error(e.code, e.message))?,
             };
         }
@@ -148,7 +199,7 @@ pub(crate) fn parse<'a>(token: Token<'a>, limits: &Limits) -> Parsed<Chain<'a>> 
     if base.text.is_empty() {
         return Err(base.error(ErrorCode::Syntax, "Expected a sprite's name"));
     }
-    check_name(base)?;
+    check_sprite_name(base)?;
     let mut ops = Vec::new();
     for &part in &parts[1..] {
         ops.push((part, modifier(part, limits)?));
@@ -228,6 +279,53 @@ fn modifier<'a>(part: Token<'a>, limits: &Limits) -> Parsed<Op<'a>> {
                 ));
             }
             Ok(Op::Outline(key))
+        }
+        "size" => {
+            let a = args
+                .as_ref()
+                .ok_or_else(|| part.error(ErrorCode::Syntax, "Expected `size(WxH[,tile])`"))?;
+            if a.is_empty() || a.len() > 2 {
+                return Err(part.error(ErrorCode::Syntax, "Expected `size(WxH[,tile])`"));
+            }
+            let (w, h) = super::size(a[0], limits.max_sprite_side)?;
+            let fill = match a.get(1).map(|t| t.text) {
+                None | Some("stretch") => Fill::Stretch,
+                Some("tile") => Fill::Tile,
+                _ => return Err(a[1].error(ErrorCode::InvalidArgument, "Expected stretch or tile")),
+            };
+            Ok(Op::Size(w, h, fill))
+        }
+        "shadow" => {
+            let a = args.as_ref().ok_or_else(|| {
+                part.error(
+                    ErrorCode::Syntax,
+                    "Expected `shadow(key,dx,dy[,hard|long])`",
+                )
+            })?;
+            if !(3..=4).contains(&a.len()) {
+                return Err(part.error(
+                    ErrorCode::Syntax,
+                    "Expected `shadow(key,dx,dy[,hard|long])`",
+                ));
+            }
+            let mut chars = a[0].text.chars();
+            let key = chars
+                .next()
+                .ok_or_else(|| a[0].error(ErrorCode::Syntax, "Expected one palette key"))?;
+            if chars.next().is_some() || RESERVED_KEYS.contains(&key) {
+                return Err(a[0].error(ErrorCode::Syntax, "Expected one palette key"));
+            }
+            let mode = match a.get(3).map(|t| t.text) {
+                None | Some("hard") => Shadow::Hard,
+                Some("long") => Shadow::Long,
+                _ => return Err(a[3].error(ErrorCode::InvalidArgument, "Expected hard or long")),
+            };
+            Ok(Op::Shadow(
+                key,
+                integer(a[1], -8, 8)? as i32,
+                integer(a[2], -8, 8)? as i32,
+                mode,
+            ))
         }
         _ => Err(part.error(
             ErrorCode::Syntax,

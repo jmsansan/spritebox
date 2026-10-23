@@ -74,6 +74,7 @@ pub struct FontExport {
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub struct Export {
+    pub themes: Vec<crate::ThemeExport>,
     pub atlas: Atlas,
     pub tilesets: Vec<TilesetExport>,
     pub tilemaps: Vec<Tilemap>,
@@ -93,6 +94,20 @@ impl Export {
         w.object(None);
         write_header(&mut w);
         self.atlas.write_json(&mut w, ATLAS_FILE);
+        if !self.themes.is_empty() {
+            w.object(Some("themes"));
+            for theme in &self.themes {
+                w.object(Some(&theme.name));
+                w.string(Some("atlas"), &theme.file);
+                w.object(Some("tilesets"));
+                for tileset in &theme.tilesets {
+                    w.string(Some(&tileset.name), &tileset.file);
+                }
+                w.close('}');
+                w.close('}');
+            }
+            w.close('}');
+        }
         w.object(Some("tilesets"));
         for t in &self.tilesets {
             w.object(Some(&t.name));
@@ -159,6 +174,12 @@ impl Export {
         for f in &self.fonts {
             files.push((f.file.clone(), f.ttf.clone()));
         }
+        for theme in &self.themes {
+            files.push((theme.file.clone(), crate::png::encode(&theme.image)));
+            for tileset in &theme.tilesets {
+                files.push((tileset.file.clone(), crate::png::encode(&tileset.image)));
+            }
+        }
         files.push((METADATA_FILE.to_owned(), self.to_json().into_bytes()));
         files
     }
@@ -169,9 +190,43 @@ pub(crate) fn build(
     options: &ExportOptions,
     limits: &Limits,
 ) -> Result<Export> {
+    build_copies(document, options, limits, 1)
+}
+
+pub(crate) fn build_copies(
+    document: &Document,
+    options: &ExportOptions,
+    limits: &Limits,
+    copies: u64,
+) -> Result<Export> {
     let atlas = document.atlas_with(&options.atlas, limits)?;
     let pad = options.atlas.padding;
     let max = options.atlas.max_side;
+    let mut pixels = atlas.image.width() as u64 * atlas.image.height() as u64;
+    for tileset in &document.tilesets {
+        let (w, h) = tileset.padded_size(pad);
+        pixels = pixels
+            .checked_add(
+                w.checked_mul(h)
+                    .ok_or_else(|| Error::limit("Export image size overflow"))?,
+            )
+            .ok_or_else(|| Error::limit("Export image budget overflow"))?;
+    }
+    if pixels
+        .checked_mul(copies)
+        .is_none_or(|n| n > limits.max_image_pixels)
+    {
+        return Err(Error::limit(
+            "The exported images exceed the aggregate pixel limit",
+        ));
+    }
+    let files = (document.tilesets.len() as u64 + 1)
+        .checked_mul(copies)
+        .and_then(|n| n.checked_add(document.fonts.len() as u64 + 1))
+        .ok_or_else(|| Error::limit("Export file count overflow"))?;
+    if files > limits.max_export_files as u64 {
+        return Err(Error::limit("More than the export file limit"));
+    }
     let mut tilesets = Vec::with_capacity(document.tilesets.len());
     for t in &document.tilesets {
         let (w, h) = t.padded_size(pad);
@@ -215,6 +270,7 @@ pub(crate) fn build(
         })
         .collect::<Result<Vec<_>>>()?;
     Ok(Export {
+        themes: Vec::new(),
         atlas,
         tilesets,
         tilemaps: document.tilemaps.clone(),

@@ -46,6 +46,15 @@ pub struct Font {
     pub(crate) baseline: u32,
     pub(crate) line_height: u32,
     pub(crate) glyphs: Vec<Glyph>,
+    pub(crate) kerning: Vec<KernPair>,
+}
+
+/// An adjustment in pixels between two glyphs.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct KernPair {
+    pub left: char,
+    pub right: char,
+    pub adjustment: i32,
 }
 
 impl Font {
@@ -72,21 +81,39 @@ impl Font {
         self.glyphs.iter().find(|g| g.ch == ch)
     }
 
+    /// Authored kerning pairs, ordered by left and right character.
+    pub fn kerning(&self) -> &[KernPair] {
+        &self.kerning
+    }
+
+    /// Pixel adjustment before `right` when it follows `left`.
+    pub fn kern(&self, left: char, right: char) -> i32 {
+        self.kerning
+            .binary_search_by_key(&(left, right), |k| (k.left, k.right))
+            .ok()
+            .map_or(0, |i| self.kerning[i].adjustment)
+    }
+
     /// The size of `text` drawn by [`Font::render`], in pixels.
     pub fn measure(&self, text: &str) -> (u32, u32) {
         let mut width = 0u64;
         let mut lines = 0u64;
         for line in text.split('\n') {
             lines += 1;
-            let w: u64 = line
-                .chars()
-                .map(|c| {
-                    self.glyph(c)
-                        .or_else(|| self.glyph('?'))
-                        .map_or(0, |g| g.advance as u64)
-                })
-                .sum();
-            width = width.max(w);
+            let mut previous = None;
+            let mut w = 0u64;
+            let mut right = 0u64;
+            for c in line.chars() {
+                if let Some(g) = self.glyph(c).or_else(|| self.glyph('?')) {
+                    let adjustment = previous.map_or(0, |p| self.kern(p, g.ch));
+                    w = (w as i64 + adjustment as i64).max(0) as u64;
+                    right = right.max(w + g.width as u64);
+                    w += g.advance as u64;
+                    right = right.max(w);
+                    previous = Some(g.ch);
+                }
+            }
+            width = width.max(right);
         }
         let height = (lines - 1) * self.line_height as u64 + self.height as u64;
         (
@@ -108,11 +135,14 @@ impl Font {
         let mut image = Image::new_with(w.max(1), h.max(1), limits)?;
         for (row, line) in text.split('\n').enumerate() {
             let top = row as u32 * self.line_height;
-            let mut pen = 0;
+            let mut pen = 0u32;
+            let mut previous = None;
             for c in line.chars() {
                 let Some(glyph) = self.glyph(c).or_else(|| self.glyph('?')) else {
                     continue;
                 };
+                let adjustment = previous.map_or(0, |p| self.kern(p, glyph.ch));
+                pen = (pen as i64 + adjustment as i64).max(0) as u32;
                 for y in 0..self.height {
                     for x in 0..glyph.width {
                         if glyph.pixel(x, y) {
@@ -121,6 +151,7 @@ impl Font {
                     }
                 }
                 pen += glyph.advance;
+                previous = Some(glyph.ch);
             }
         }
         Ok(image)
