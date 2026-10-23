@@ -1,15 +1,15 @@
 [package]
 name = "spritebox"
-version = "0.4.0"
+version = "0.4.1"
 edition = "2024"
 rust-version = "1.85"
 authors = ["Jose Sanchez <jose.sansan@proton.me>"]
-description = "Zero-dependency, safe Rust pixel art as text: sprites, UI panels, text, themes, screens, animations, tilemaps and pixel fonts, rendered to PNG and atlases"
+description = "Create 2D pixel art and game assets from text: sprites, tilemaps, procedural textures, UI and pixel fonts. Export PNG, sprite atlases and TTF with a zero-dependency Rust library and CLI."
 license = "MIT"
 repository = "https://github.com/jmsansan/spritebox"
 documentation = "https://docs.rs/spritebox"
 readme = "README.md"
-keywords = ["pixel-art", "sprite", "gamedev", "png", "tilemap"]
+keywords = ["pixel-art", "sprite", "gamedev", "tilemap", "procedural"]
 categories = ["game-development", "multimedia::images", "graphics", "command-line-utilities"]
 include = ["/Cargo.toml", "/Cargo.lock", "/src/**", "/tests/**", "/examples/*.rs", "/examples/*.spritebox", "/examples/night_shift/**", "/README.md", "/CHANGELOG.md", "/LICENSE"]
 

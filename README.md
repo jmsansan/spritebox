@@ -6,11 +6,11 @@
 [![MSRV 1.85](https://img.shields.io/badge/rust-1.85%2B-blue.svg)](#install)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-**2D pixel art as plain text, in safe Rust with zero dependencies: palettes, sprites,
-procedural textures, animations, autotiled tilesets, tilemaps and pixel fonts written
-as text, validated
-with exact diagnostics, and rendered to RGBA images, PNG files, atlases with their
-metadata, TrueType fonts and preview sheets.**
+**A Rust library and command-line tool for creating 2D pixel art and game assets
+from plain text: sprites, sprite sheets, tilemaps, procedural textures, game UI
+and pixel fonts. Export PNG images, packed sprite atlases with JSON metadata,
+TrueType fonts and preview sheets. Safe Rust, zero dependencies and deterministic
+output, with WebAssembly support.**
 
 No C libraries, build scripts or `unsafe`: only the standard library, with its own
 PNG encoder and decoder, DEFLATE, CRC-32, Adler-32 and TrueType writer. The same text gives the same
@@ -23,6 +23,23 @@ line, a column and a stable code, deterministic output, and preview sheets that 
 a whole file at a glance. People read and edit the same files, and diffs show which
 pixels changed. It is a sibling of [audiobox](https://github.com/jmsansan/audiobox-rs),
 which does the same for game audio.
+
+## What can you make?
+
+- **Sprites and sprite sheets:** layered pixel art, animation frames, palette swaps
+  and packed texture atlases for 2D games.
+- **Tilesets and tilemaps:** connected terrain with autotiling, map layouts and
+  collision metadata.
+- **Procedural textures:** repeatable seeded noise, ordered dithering and palette
+  ramps for pixel-art surfaces.
+- **Game UI assets:** nine-slice panels, buttons with states, icons, text labels,
+  light/dark themes and composed menu screens.
+- **Bitmap and pixel fonts:** editable glyph grids, kerning, rendered text and
+  TrueType (`.ttf`) export.
+
+Use the Rust API in an asset pipeline, the CLI in a build script, or the in-memory
+library in a browser through WebAssembly. Text files work with version control and
+AI-assisted asset generation; the same source can be edited by hand.
 
 ![Night Shift: an original rainy city with an animated elevated train, neon signs and a ramen stall](docs/night-shift.gif)
 

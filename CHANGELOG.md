@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.1
+
+### Changed
+
+- Clarify the package description around text-based pixel art and 2D game asset
+  generation, including the Rust library, CLI and supported export formats.
+- Use the five crates.io keywords for pixel art, sprites, game development,
+  tilemaps and procedural generation.
+- Expand the README introduction with concrete uses for sprites, tilesets,
+  textures, UI assets and pixel fonts. Rendering and public APIs are unchanged.
+
 ## 0.4.0
 
 UI building blocks, composed and previewed at their real pixel sizes.
