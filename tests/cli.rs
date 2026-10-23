@@ -461,3 +461,90 @@ fn render_marks_lint_on_the_preview() {
     assert!(marked.height() > plain.height());
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn ui_themes_and_screen_rendering() {
+    let dir = temp_dir("ui");
+    let file = write(
+        &dir,
+        "ui.spritebox",
+        "palette p\n  w #ffffff\nsprite dot 1x1\n  w\ntheme dark of p\n  w #000000\nscreen view 1x1\n  dot at 0,0\n",
+    );
+    let directory = dir.join("all");
+    let output = spritebox(&[
+        "render",
+        &file,
+        "--out",
+        directory.to_str().unwrap(),
+        "--theme",
+        "all",
+        "--preview",
+    ]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    assert!(directory.join("atlas-dark.png").is_file());
+    assert!(
+        std::fs::read_to_string(directory.join("spritebox.json"))
+            .unwrap()
+            .contains("atlas-dark.png")
+    );
+    let target = dir.join("view.png");
+    let output = spritebox(&[
+        "render",
+        &file,
+        "--screen",
+        "view",
+        "--theme",
+        "dark",
+        "--scale",
+        "3",
+        "--out",
+        target.to_str().unwrap(),
+    ]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    let image = spritebox::png::read_file(&target).unwrap();
+    assert_eq!((image.width(), image.height()), (3, 3));
+    assert_eq!(image.pixel(0, 0), Some(spritebox::Color::BLACK));
+    let output = spritebox(&[
+        "render",
+        &file,
+        "--screen",
+        "view",
+        "--out",
+        target.to_str().unwrap(),
+    ]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    assert_eq!(spritebox::png::read_file(&target).unwrap().width(), 1);
+    let missing = dir.join("missing.png");
+    let output = spritebox(&[
+        "render",
+        &file,
+        "--screen",
+        "absent",
+        "--out",
+        missing.to_str().unwrap(),
+    ]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(!missing.exists());
+    let output = spritebox(&[
+        "render",
+        &file,
+        "--theme",
+        "absent",
+        "--out",
+        missing.to_str().unwrap(),
+    ]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(!missing.exists());
+    let output = spritebox(&[
+        "render",
+        &file,
+        "--screen",
+        "view",
+        "--theme",
+        "all",
+        "--out",
+        missing.to_str().unwrap(),
+    ]);
+    assert_eq!(output.status.code(), Some(2));
+    std::fs::remove_dir_all(dir).unwrap();
+}

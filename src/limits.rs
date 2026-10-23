@@ -33,6 +33,12 @@ pub struct Limits {
     pub max_map_side: u32,
     /// Glyphs in one font. Default 4096.
     pub max_glyphs: usize,
+    /// Kerning pairs in one font. Default 4096.
+    pub max_kerning_pairs: usize,
+    /// Files in an export, including theme variants. Default 8192.
+    pub max_export_files: usize,
+    /// Placements in one screen. Default 1024.
+    pub max_screen_items: usize,
     /// Depth of definitions built on other definitions: palettes copied `from=`
     /// another, and sprites derived from sprites. Default 32.
     pub max_nesting: usize,
@@ -59,6 +65,9 @@ impl Default for Limits {
             max_tiles: 4096,
             max_map_side: 1024,
             max_glyphs: 4096,
+            max_kerning_pairs: 4096,
+            max_export_files: 8192,
+            max_screen_items: 1024,
             max_nesting: 32,
             max_image_side: 8192,
             max_image_pixels: 16 * 1024 * 1024,
@@ -70,6 +79,11 @@ impl Default for Limits {
 impl Limits {
     /// Checks that an image of `width` × `height` pixels is within the image limits.
     pub fn check_image(&self, width: u32, height: u32) -> Result<()> {
+        if width as u64 * height as u64 > isize::MAX as u64 / 4 {
+            return Err(Error::limit(
+                "Image bytes exceed the platform allocation limit",
+            ));
+        }
         if width > self.max_image_side || height > self.max_image_side {
             return Err(Error::limit(format!(
                 "Image of {width}x{height} pixels is larger than the limit of {} pixels a side",

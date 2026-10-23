@@ -20,10 +20,12 @@ Usage:
       Validate a file, then print warnings where its art does not follow
       pixel-art practice. Warnings alone exit 0, unless --strict or --deny.
   spritebox render <file> --out <dir> [--scale <n>] [--padding <n>] [--no-extrude]
-                   [--max-side <n>] [--lint] [--json]
+                   [--max-side <n>] [--lint] [--theme <name|all>] [--preview] [--json]
       Validate a file, then write atlas.png, tileset-<name>.png for each
       tileset, font-<name>.ttf for each font, spritebox.json (the metadata)
       and preview.png to <dir>.
+  spritebox render <file> --screen <name> --out <screen.png> [--scale <n>] [--theme <name>]
+      Render one screen to PNG, with integer scale (default 1).
   spritebox font <file> --out <font.ttf> [--font <name>] [--family <name>] [--json]
       Validate a file, then write one of its fonts as TrueType.
 
@@ -36,6 +38,9 @@ Options:
   --padding <n> Pixels around each sprite and tile in textures, 0..=64 (default 1).
   --no-extrude  Leave the padding transparent instead of copying edge pixels.
   --lint        Mark lint warnings on the sprites of the preview, with a legend.
+  --preview     Explicitly request the preview already included by directory render.
+  --screen <n>  Render one screen; --out names a PNG file instead of a directory.
+  --theme <n>   Apply a theme to render or lint; render accepts all for shared metadata.
   --max-side <n> The largest side of a texture, 1..=8192 (default 2048).
   --font <name> The font to write, when the file has several.
   --family <n>  The family name in the TrueType file (default: the font's name).
@@ -54,6 +59,8 @@ const EXIT_USAGE: u8 = 2;
 const EXIT_IO: u8 = 3;
 
 struct Options {
+    screen: Option<String>,
+    theme: Option<String>,
     command: String,
     file: String,
     out: Option<PathBuf>,
@@ -92,6 +99,10 @@ fn main() -> ExitCode {
 
 fn parse_args(args: &[String]) -> Result<Options, String> {
     let mut iter = args.iter();
+    let mut screen = None;
+    let mut theme = None;
+    let mut scale_given = false;
+    let mut preview = false;
     let command = iter.next().ok_or("missing command")?.clone();
     if !["check", "lint", "render", "font"].contains(&command.as_str()) {
         return Err(format!("unknown command `{command}`"));
@@ -122,6 +133,7 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
             }
             "--out" => out = Some(PathBuf::from(iter.next().ok_or("--out needs a directory")?)),
             "--scale" => {
+                scale_given = true;
                 let value = iter.next().ok_or("--scale needs a number")?;
                 scale = value
                     .parse()
@@ -139,6 +151,19 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
             }
             "--no-extrude" => atlas.extrude = false,
             "--lint" => lint = true,
+            "--preview" => preview = true,
+            "--screen" => {
+                if screen.is_some() {
+                    return Err("--screen may appear only once".into());
+                }
+                screen = Some(iter.next().ok_or("--screen needs a name")?.clone());
+            }
+            "--theme" => {
+                if theme.is_some() {
+                    return Err("--theme may appear only once".into());
+                }
+                theme = Some(iter.next().ok_or("--theme needs a name or all")?.clone());
+            }
             "--max-side" => {
                 let value = iter.next().ok_or("--max-side needs a number")?;
                 atlas.max_side = value
@@ -180,7 +205,21 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
     if command != "font" && (font.is_some() || family.is_some()) {
         return Err("--font and --family are for the font command".into());
     }
+    if command != "render" && (screen.is_some() || preview) {
+        return Err("--screen and --preview are for render".into());
+    }
+    if theme.is_some() && command != "render" && command != "lint" {
+        return Err("--theme is for render or lint".into());
+    }
+    if theme.as_deref() == Some("all") && (command != "render" || screen.is_some()) {
+        return Err("--theme all needs directory rendering without --screen".into());
+    }
+    if screen.is_some() && !scale_given {
+        scale = 1;
+    }
     Ok(Options {
+        screen,
+        theme,
         command,
         file,
         out,
@@ -217,13 +256,20 @@ fn run(options: &Options) -> ExitCode {
     if options.command == "check" {
         return report(options, &[], &[], 0);
     }
-    let document = match Document::parse_with_loader(&text, &limits, &mut loader) {
+    let mut document = match Document::parse_with_loader(&text, &limits, &mut loader) {
         Ok(document) => document,
         Err(error) => return report(options, &[error], &[], EXIT_INVALID),
     };
+    if let Some(theme) = options.theme.as_deref().filter(|name| *name != "all") {
+        document = match document.with_theme(theme) {
+            Ok(doc) => doc,
+            Err(e) => return report(options, &[e], &[], EXIT_INVALID),
+        };
+    }
     if options.command == "lint" {
         let lint = document.lint_with(
             &LintOptions {
+                screen_overlap: options.deny.contains(&LintCode::ScreenOverlap),
                 allow: options.allow.clone(),
                 ..LintOptions::default()
             },
@@ -332,13 +378,27 @@ fn render(
     options: &Options,
     limits: &Limits,
 ) -> Result<Vec<PathBuf>, Error> {
+    if let Some(name) = &options.screen {
+        let image = document
+            .screen_with(name, limits)?
+            .ok_or_else(|| Error::new(ErrorCode::UnknownName, format!("Unknown screen `{name}`")))?
+            .scaled_with(options.scale, limits)?;
+        let bytes = png::encode(&image);
+        if let Some(parent) = out.parent().filter(|p| !p.as_os_str().is_empty()) {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(out, bytes)?;
+        return Ok(vec![out.to_path_buf()]);
+    }
     // Everything is made before anything is written.
-    let export = document.export_with(
-        &ExportOptions {
-            atlas: options.atlas.clone(),
-        },
-        limits,
-    )?;
+    let export_options = ExportOptions {
+        atlas: options.atlas.clone(),
+    };
+    let export = if options.theme.as_deref() == Some("all") {
+        document.export_all_themes_with(&export_options, limits)?
+    } else {
+        document.export_with(&export_options, limits)?
+    };
     let preview = document.preview_with(
         &PreviewOptions {
             scale: options.scale,
@@ -349,6 +409,21 @@ fn render(
     )?;
     let mut files = export.files();
     files.push(("preview.png".to_owned(), png::encode(&preview)));
+    let mut names = std::collections::HashSet::new();
+    if files.len() > limits.max_export_files {
+        return Err(Error::new(
+            ErrorCode::LimitExceeded,
+            "More than the export file limit",
+        ));
+    }
+    for (name, _) in &files {
+        if !names.insert(name.to_ascii_lowercase()) {
+            return Err(Error::new(
+                ErrorCode::InvalidArgument,
+                format!("Output filenames collide at `{name}`"),
+            ));
+        }
+    }
     let io = |path: &Path, e: std::io::Error| {
         Error::new(
             ErrorCode::Io,

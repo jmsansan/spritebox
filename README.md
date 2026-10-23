@@ -53,12 +53,14 @@ are rendered with spritebox. See the [Rust generator](examples/night_shift.rs),
 | Seeded procedural textures: value noise and ordered dithering | Available |
 | Lint: warnings where art is valid but strays from pixel-art practice, marked on previews | Available |
 | Palette ramps, declared or made with hue shifting; groups of sprites | Available |
+| Resizable nine/three-slice panels, shadows and static text with kerning | Available |
+| Widget states, fixed-grid icon sets, themes and composed UI screens | Available |
 
 ## Install
 
 ```toml
 [dependencies]
-spritebox = "0.3"
+spritebox = "0.4"
 ```
 
 Rust 1.85 or newer. The command-line tool installs with
@@ -241,6 +243,13 @@ derived from a panel keeps its borders through flips, rotations, padding and pal
 swaps (they follow the pixels), loses them through an offset, and may write its own:
 `sprite button_pressed = button:swap(dark) slice=3`.
 
+Resize a panel with `panel:size(120x40)` (nearest-neighbour stretch), or
+`panel:size(120x40,tile)` to repeat the edges and centre. Corners and `slice=`
+remain unchanged. A three-slice bar has zero insets on its fixed axis, such as
+`slice=4,0,4,0`; its height cannot change. Targets smaller than the borders, or
+expanded centres without source pixels, are errors. Rust has `Sprite::resize`
+and `resize_with`, with `Fill::Stretch` or `Fill::Tile`.
+
 **Layers.** Instead of rows, a sprite may have layers, drawn bottom first:
 
 ```text
@@ -296,6 +305,8 @@ same chains name the frames of animations and the layers of sprites.
 | `pad(n)` | `n` empty pixels added on every side |
 | `swap(PALETTE)` | The same keys colored by another palette, which must have every key the sprite uses |
 | `outline(KEY)` | A one-pixel outline of `KEY` on the transparent pixels that share an edge with visible ones, as a new bottom layer; pad first if the shape touches the edges |
+| `size(WxH[,tile])` | Resize a panel while retaining its corners and slice insets; stretch by default |
+| `shadow(KEY,dx,dy[,hard\|long])` | An offset silhouette below the sprite; grow the canvas and slice borders on that side. Offsets are -8..=8; `long` joins the original and offset silhouettes |
 
 ```text
 sprite coin_night = coin:swap(dusk)
@@ -305,6 +316,12 @@ sprite gem_glow = gem:pad(1):outline(y)
 
 Sprites may be derived from derived sprites, in any order in the file, but not in a
 circle.
+
+Shadows use ordinary palette colors, including alpha, and the same integer
+source-over as other layers. Long-shadow overlaps are drawn once, so translucent
+shadows do not get darker at overlapping steps. Rust has `Sprite::shadow` and
+`shadow_with`, with `Shadow::Hard` or `Shadow::Long`. Growing modifiers enforce
+image, sprite and layer limits before allocating their result.
 
 ### Animations
 
@@ -519,7 +536,7 @@ as **TrueType**:
 - **Tables.** The ten tables TrueType requires: `cmap` (formats 4 and, beyond the
   Basic Multilingual Plane, 12), `glyf`, `loca`, `head`, `hhea`, `hmtx`, `maxp`,
   `name`, `OS/2` (version 4) and `post`. Glyph 0, `.notdef`, is a hollow box. There
-  is no hinting and no kerning, and the file holds no time stamp, so the same font
+  is no hinting; kerning adds an optional `kern` table. The file holds no time stamp, so the same font
   gives the same bytes.
 - **Checked.** The tests read the file back table by table. With
   `SPRITEBOX_FONT_TESTS=1`, FreeType (`fc-scan`) reads it and finds Spanish covered,
@@ -540,6 +557,130 @@ group items  sword shield potion key
 A group's sprites must be defined, each once. Groups appear in the metadata, and
 lint checks that a group's sprites match, as it does an animation's frames and a
 tileset's tiles.
+
+## UI
+
+[examples/ui.spritebox](examples/ui.spritebox) combines panels, text, button and
+checkbox states, six icons, a dark theme, a title screen and a pause menu. Its
+explicit lint allowances describe intentional compact corners and accent pixels.
+
+![UI kit and screens at native pixel multiples](docs/ui-preview.png)
+
+### Text
+
+```text
+text title font=hud palette=ui color=k width=144 align=center
+  START GAME
+```
+
+A `text` definition is an ordinary sprite: it works in modifier chains, layers,
+animation frames and screens. `font=` and one-character `color=` are required;
+`palette=` follows the same default as other sprites. Optional `width=` wraps at
+spaces; a word that cannot fit is an error. `align=left|center|right` aligns each
+line within the width. Without width, use the widest line. `line_height=` defaults
+to the font's; total height includes the last glyph's full grid and descender.
+
+The common body indentation is removed; additional leading spaces remain, trailing
+spaces are trimmed, and indented blank lines add a line. A whole word such as
+`U+003B` inserts the corresponding character (here `;`), using the glyph-name escape
+syntax. Missing glyphs are errors at their source character, rather than fallback
+glyphs. Rust has `Font::sprite`/`sprite_with` and `TextOptions` with `Align`.
+
+Fonts accept optional `kern AV -1` entries, or escaped pairs such as
+`kern U+0041,U+0056 -1`. Both glyphs must exist. An adjustment cannot move the pen
+before its preceding glyph. `Font::kern` returns the adjustment in pixels;
+`Font::kerning` lists pairs in character order. Text rendering applies pairs, and
+TTF export writes a horizontal format-0 `kern` table when pairs exist. Fonts without
+pairs retain their original ten-table export. The interoperability job checks pairs
+with both ab_glyph and FreeType.
+
+### Widget states
+
+```text
+states button
+  normal button_frame
+  hover button_frame:outline(a)
+  pressed button_frame:flip_y
+```
+
+`normal` is mandatory and first. State names are free identifiers; each member is
+an ordinary sprite named `button.normal`, `button.hover`, and so on. Members must
+have equal dimensions and equal panel insets, including whether they are panels.
+Checkboxes can add `off`, `on`, `off_hover` and `on_hover` after `normal`.
+`Document::states`/`state_set` provide `StateSet` values and state lookup.
+
+### Icon sets
+
+```text
+icons items 8x8 palette=ui outline=k margin=1
+  icon sword
+    ........
+    ...
+```
+
+Each icon has exactly the declared size and becomes `items.sword`. `outline=`
+requires that every visible silhouette boundary pixel use that key; `margin=N`
+requires transparent outer pixels. Violations are errors. Icon headers and the
+set accept `lint=allow(...)` for deliberate art choices. `Document::icon_sets` and
+`icon_set` expose member order. Preview sheets give each set its own named strip.
+Both icon sets and state sets join the existing set consistency checks.
+
+### Themes
+
+```text
+theme dark of ui
+  k #dce9ef
+  f #172d3a
+```
+
+A theme replaces a subset of an existing palette's keys; omitted keys retain the
+base colors and unknown keys are errors. `Document::with_theme(name)` returns a
+recolored document, including swap targets, tiles and screen items. Applying a
+different theme starts from the original palettes. Each theme targets the named
+palette identity; independently copied palettes keep their own colors.
+
+Geometry is made from the base palettes and retained when themes change alpha.
+Documents with themes deduplicate atlas entries by palette/key structure, so
+recoloring cannot split or merge regions. Region coordinates remain identical.
+
+`render FILE --out DIR --theme dark` writes the chosen colors to the normal
+filenames. `--theme all` writes the base atlas plus `atlas-dark.png` and themed
+tileset images, with one metadata file describing the shared layout and variants.
+Rust uses `Document::export_all_themes`/`export_all_themes_with`. The name `all` is
+reserved. Output names that collide, including by ASCII case on Windows, fail
+before writing. All retained themed images share the aggregate pixel/file budgets.
+
+### Screens
+
+```text
+screen title 320x180 palette=ui background=u grid=2
+  dialog at 80,14
+  button.hover at 104,54
+  start at 104,60
+  items.sword at 104,132
+```
+
+Items are sprite chains at signed top-left pixel coordinates (+x right, +y down),
+drawn in order with source-over and clipped to the screen. Different sprite palettes
+are allowed. `background=` is a palette key; omit it for transparency. `grid=` is
+optional and enables position checks. Screens and screen-only chains are excluded
+from the atlas.
+
+`Document::screen(name)` returns an optional rendered image; `screen_with` returns
+`Result<Option<Image>>` for explicit limits. `screens()` exposes definitions/items.
+`render FILE --screen title --out title.png --scale 3` writes only that screen at an
+integer multiple (default 1). Directory render always includes a preview; its
+optional `--preview` flag makes this explicit. Screens appear at 1x, 2x and 3x,
+independently of the sprites' preview scale. `--theme all` needs directory render;
+one screen can select one named theme.
+
+Screen lint adds `screen_bounds`, `off_grid`, and opt-in `screen_overlap` (opaque
+item pixels). Enable overlap with `LintOptions::screen_overlap` or
+`lint --deny screen_overlap`. `low_contrast` compares text to its composed backing,
+including backing layers in the same sprite. `min_text_contrast` defaults to an
+OKLab lightness difference of 2500/10000 (0.25). Theme-aware lint uses
+`lint FILE --theme dark --strict`. Screen diagnostics retain item positions and
+imported filenames, and accept ordinary lint suppression.
 
 ## Output
 
@@ -669,8 +810,12 @@ All coordinates are in **texels** (pixels of a texture) from the texture's
 | `atlas.image` | string | The atlas texture's file name: `atlas.png`. |
 | `atlas.size` | `[width, height]` | The atlas's size in texels. |
 | `atlas.padding` | integer | Texels around each sprite, extruded or transparent. |
-| `atlas.sprites` | object | For each named sprite, then each frame sprite, its rectangle. Sprites with identical pixels share one. |
+| `atlas.sprites` | object | For each named sprite, then each frame sprite, its rectangle. Identical pixels share a region; themed documents also preserve palette/key identity to keep layout stable. |
 | `atlas.panels` | object | For each sprite with `slice=`, its nine-slice borders `{left, top, right, bottom}`, in texels inward from each edge of its rectangle. |
+| `atlas.states.NAME` | object | State name to sprite name, such as `{"normal":"button.normal","hover":"button.hover"}`. Present when state sets exist. |
+| `atlas.icon_sets.NAME` | array of strings | Icon sprite names in authored order. Present when icon sets exist. |
+| `themes.NAME.atlas` | string | Variant atlas filename in an all-themes export; uses the base atlas's rectangles. |
+| `themes.NAME.tilesets` | object | Tileset names to themed image filenames, with the base tile indices and rectangles. |
 | `animations.NAME.loop` | boolean | `true`: after the last frame, start again; `false`: stay on it. |
 | `animations.NAME.frames` | array | The frames in order: `sprite` (a key of `atlas.sprites`), `rect` (its rectangle), `ticks` (how many fixed steps it shows, at least 1; 60 a second in Diamon), and `flip_x` and `flip_y` (draw the rectangle mirrored). |
 | `groups.NAME` | array of strings | The group's sprites, each a key of `atlas.sprites`, in the order written. |
@@ -903,6 +1048,9 @@ hand-written files and untrusted input; raise them for trusted input.
 | `max_tiles` | 4096 tiles in a tileset, terrain variants included |
 | `max_map_side` | 1024 tiles |
 | `max_glyphs` | 4096 glyphs in a font |
+| `max_kerning_pairs` | 4096 kerning pairs in a font |
+| `max_screen_items` | 1024 placements in a screen |
+| `max_export_files` | 8192 files, including theme variants |
 | `max_nesting` | 32 levels of palettes copied `from=` others, or of sprites derived from sprites |
 | `max_image_side` | 8192 pixels, for any image created or decoded |
 | `max_image_pixels` | 16 Mi pixels, for any image, and for all sprites together |
@@ -921,7 +1069,7 @@ fn parse_trusted(text: &str) -> spritebox::Result<Document> {
 What spritebox does not do, as of this release:
 
 - No drawing tools or editor: art is text, reviewed through preview sheets.
-- Fonts are one weight and style, without kerning, ligatures or hinting; outlines
+- Fonts are one weight and style, without ligatures or hinting; outlines
   are exact squares, so they are crisp at integer multiples of the pixel size and
   blur in between, like any pixel font.
 - Terrains connect only to themselves: there are no transitions between terrains,

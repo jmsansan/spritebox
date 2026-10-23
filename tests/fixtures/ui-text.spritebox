@@ -1,0 +1,31 @@
+palette p
+  . transparent
+  w #ffffff
+  k #000000
+
+font hud height=3 baseline=2 line_height=4 spacing=1 space=1
+  glyph A
+    ##
+    #.
+    ##
+  glyph V
+    #.
+    #.
+    .#
+  glyph U+003B
+    #
+    .
+    #
+  kern AV -1
+
+text label font=hud color=w
+  AV
+
+text paragraph font=hud color=w width=6 align=center
+  AV AV
+
+sprite outlined = label:pad(1):outline(k)
+animation title loop
+  label 1
+sprite layered 5x3
+  layer text = label

@@ -647,7 +647,11 @@ impl<'a> Parser<'a, '_> {
                     width: def.width,
                     height: def.height,
                     palette: palette.clone(),
-                    layers: vec![Layer { name: None, keys }],
+                    layers: vec![Layer {
+                        text: false,
+                        name: None,
+                        keys,
+                    }],
                     slice: None,
                 })
             }

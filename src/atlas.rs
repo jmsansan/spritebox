@@ -99,10 +99,13 @@ pub struct AtlasFrame {
 
 /// Every sprite of a document in one texture, and where each one is.
 ///
-/// Sprites with identical pixels share one rectangle.
+/// Sprites with identical pixels share one rectangle. Documents with themes also
+/// retain palette/key identity, so recoloring cannot change the packing.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub struct Atlas {
+    pub states: Vec<crate::StateSet>,
+    pub icon_sets: Vec<crate::IconSet>,
     pub image: Image,
     pub padding: u32,
     /// Named sprites in the order defined, then animation frames' sprites in the
@@ -157,6 +160,28 @@ impl Atlas {
             }
         }
         w.close('}');
+        if !self.states.is_empty() {
+            w.object(Some("states"));
+            for set in &self.states {
+                w.object(Some(set.name()));
+                for (name, sprite) in set.states() {
+                    w.string(Some(name), sprite);
+                }
+                w.close('}');
+            }
+            w.close('}');
+        }
+        if !self.icon_sets.is_empty() {
+            w.object(Some("icon_sets"));
+            for set in &self.icon_sets {
+                w.array(Some(set.name()));
+                for name in set.members() {
+                    w.string(None, name);
+                }
+                w.close(']');
+            }
+            w.close('}');
+        }
         w.close('}');
         w.object(Some("animations"));
         for animation in &self.animations {
@@ -211,7 +236,12 @@ pub(crate) fn build(document: &Document, options: &AtlasOptions, limits: &Limits
     let mut slot = Vec::with_capacity(sprites.len());
     for sprite in &sprites {
         let image = sprite.render();
-        let candidates = index_of.entry(image.pixels().to_vec()).or_default();
+        let signature = if document.themes.is_empty() {
+            image.pixels().to_vec()
+        } else {
+            crate::themes::palette_signature(sprite)
+        };
+        let candidates = index_of.entry(signature).or_default();
         let found = candidates
             .iter()
             .copied()
@@ -291,6 +321,8 @@ pub(crate) fn build(document: &Document, options: &AtlasOptions, limits: &Limits
         regions,
         animations,
         groups: document.groups.clone(),
+        states: document.states.clone(),
+        icon_sets: document.icon_sets.clone(),
     })
 }
 

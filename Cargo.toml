@@ -1,10 +1,10 @@
 [package]
 name = "spritebox"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 rust-version = "1.85"
 authors = ["Jose Sanchez <jose.sansan@proton.me>"]
-description = "Zero-dependency, safe Rust pixel art as plain text: palettes, sprites, animations, tilesets with autotiling, tilemaps and pixel fonts, rendered to RGBA, PNG and atlases with metadata"
+description = "Zero-dependency, safe Rust pixel art as text: sprites, UI panels, text, themes, screens, animations, tilemaps and pixel fonts, rendered to PNG and atlases"
 license = "MIT"
 repository = "https://github.com/jmsansan/spritebox"
 documentation = "https://docs.rs/spritebox"

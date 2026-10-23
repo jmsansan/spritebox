@@ -57,8 +57,64 @@ impl<'a> Parser<'a, '_> {
         let mut glyphs: Vec<Glyph> = Vec::new();
         let mut seen: HashMap<char, Position> = HashMap::new();
         let mut complete = true;
-        for (i, child) in node.children.iter().enumerate() {
-            if i == self.limits.max_glyphs {
+        let mut kerns = Vec::new();
+        let mut kern_names = std::collections::HashSet::new();
+        let mut glyph_entries = 0usize;
+        for child in &node.children {
+            if child.keyword() == "kern" {
+                let tokens = &child.line.tokens;
+                if kerns.len() >= self.limits.max_kerning_pairs {
+                    return Err(tokens[0]
+                        .error(ErrorCode::LimitExceeded, "More than the kerning pair limit"));
+                }
+                if tokens.len() != 3 || !child.children.is_empty() {
+                    return Err(tokens[0].error(ErrorCode::Syntax, "Expected `kern AV -1`"));
+                }
+                let parts: Vec<_> = tokens[1].text.split(',').collect();
+                let pair: Vec<char> = if parts.len() == 2 {
+                    parts
+                        .iter()
+                        .map(|p| {
+                            character(Token {
+                                text: p,
+                                pos: tokens[1].pos,
+                            })
+                        })
+                        .collect::<Parsed<Vec<_>>>()?
+                } else {
+                    tokens[1].text.chars().collect()
+                };
+                if pair.len() != 2 {
+                    return Err(tokens[1].error(
+                        ErrorCode::Syntax,
+                        "Expected two characters, or U+0041,U+0056",
+                    ));
+                }
+                let adjustment = tokens[2]
+                    .text
+                    .parse::<i32>()
+                    .ok()
+                    .filter(|v| v.unsigned_abs() <= max)
+                    .ok_or_else(|| {
+                        tokens[2].error(
+                            ErrorCode::InvalidArgument,
+                            "Kerning exceeds the font limits",
+                        )
+                    })?;
+                if !kern_names.insert((pair[0], pair[1])) {
+                    return Err(tokens[1].error(ErrorCode::DuplicateName, "Duplicate kerning pair"));
+                }
+                kerns.push((
+                    crate::KernPair {
+                        left: pair[0],
+                        right: pair[1],
+                        adjustment,
+                    },
+                    tokens[1],
+                ));
+                continue;
+            }
+            if glyph_entries >= self.limits.max_glyphs {
                 self.errors.push(child.line.first().error(
                     ErrorCode::LimitExceeded,
                     format!("More than the limit of {} glyphs", self.limits.max_glyphs),
@@ -66,6 +122,7 @@ impl<'a> Parser<'a, '_> {
                 complete = false;
                 break;
             }
+            glyph_entries += 1;
             match self.glyph(child, height, spacing) {
                 Ok((glyph, token)) => {
                     if let Some(&first) = seen.get(&glyph.ch) {
@@ -124,6 +181,22 @@ impl<'a> Parser<'a, '_> {
             }
         }
         if complete {
+            for (pair, token) in &kerns {
+                let left = glyphs.iter().find(|g| g.ch == pair.left);
+                if left.is_none() || !glyphs.iter().any(|g| g.ch == pair.right) {
+                    return Err(token.error(
+                        ErrorCode::UnknownName,
+                        "A kerning pair names an unknown glyph",
+                    ));
+                }
+                if pair.adjustment < -(left.unwrap().advance as i32) {
+                    return Err(token.error(
+                        ErrorCode::InvalidArgument,
+                        "Kerning cannot move the pen before the preceding glyph",
+                    ));
+                }
+            }
+            kerns.sort_by_key(|(k, _)| (k.left, k.right));
             self.fonts.push((
                 name,
                 Font {
@@ -132,6 +205,7 @@ impl<'a> Parser<'a, '_> {
                     baseline,
                     line_height,
                     glyphs,
+                    kerning: kerns.into_iter().map(|(k, _)| k).collect(),
                 },
             ));
         } else {

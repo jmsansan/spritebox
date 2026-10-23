@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use super::lex::{Node, Token};
-use super::{Parsed, Parser, SetDef, check_name, duplicate};
+use super::{Parsed, Parser, SetDef, check_name, check_sprite_name, duplicate};
 use crate::lint::Kind;
 use crate::{ErrorCode, Group, Position, Sprite};
 
@@ -38,7 +38,7 @@ impl<'a> Parser<'a, '_> {
                     ));
                 }
                 _ => {
-                    check_name(token)?;
+                    check_sprite_name(token)?;
                     if let Some(first) = seen.get(token.text) {
                         return Err(token.error(
                             ErrorCode::DuplicateName,

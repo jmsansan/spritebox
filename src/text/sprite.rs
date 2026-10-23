@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use super::chain::{self, Chain};
 use super::lex::{Node, Token};
-use super::{Header, Parsed, Parser, check_name, duplicate, size};
+use super::{Header, Parsed, Parser, check_name, check_sprite_name, duplicate, size};
 use crate::lint::{Detail, DrawnLayer, Kind};
 use crate::sprite::{Insets, Layer};
 use crate::{Error, ErrorCode, Palette, Position, Sprite};
@@ -18,6 +18,7 @@ pub(crate) struct SpriteDef<'a> {
 }
 
 pub(crate) enum Body<'a> {
+    Text(super::lettering::TextDef<'a>),
     Grid {
         width: u32,
         height: u32,
@@ -68,7 +69,7 @@ impl SpriteDef<'_> {
             Body::Texture { ramp, .. } => {
                 Detail::Texture(ramp.iter().filter_map(|t| t.text.chars().next()).collect())
             }
-            Body::Derived(_) => Detail::Other,
+            Body::Derived(_) | Body::Text(_) => Detail::Other,
         }
     }
 
@@ -76,7 +77,7 @@ impl SpriteDef<'_> {
     pub(super) fn dependencies(&self) -> Vec<Token<'_>> {
         match &self.body {
             Body::Derived(chain) => vec![chain.base],
-            Body::Texture { .. } => Vec::new(),
+            Body::Texture { .. } | Body::Text(_) => Vec::new(),
             Body::Grid { layers, .. } => layers
                 .iter()
                 .filter_map(|l| match &l.source {
@@ -195,7 +196,7 @@ impl<'a> Parser<'a, '_> {
     fn derived_sprite(&mut self, node: &Node<'a>) -> Parsed<()> {
         let tokens = &node.line.tokens;
         let name = tokens[1];
-        check_name(name)?;
+        check_sprite_name(name)?;
         let chain_token = *tokens.get(3).ok_or_else(|| {
             tokens[2].end_error("Expected a sprite and its modifiers after `=`".to_owned())
         })?;
@@ -359,7 +360,11 @@ impl<'a> Parser<'a, '_> {
 
     /// Resolves every sprite, each after the sprites it is built from. Returns the
     /// sprites that resolved, in definition order, with the positions of their names.
-    pub(super) fn resolve_sprites(&mut self, palettes: &[Palette]) -> Vec<(Sprite, Position)> {
+    pub(super) fn resolve_sprites(
+        &mut self,
+        palettes: &[Palette],
+        fonts: &[crate::Font],
+    ) -> Vec<(Sprite, Position)> {
         let defs = std::mem::take(&mut self.sprites);
         let mut index: HashMap<&str, usize> = HashMap::new();
         let mut usable = vec![true; defs.len()];
@@ -381,7 +386,8 @@ impl<'a> Parser<'a, '_> {
             let mut stack = vec![(root, false)];
             while let Some((i, expanded)) = stack.pop() {
                 if expanded {
-                    let depth = self.build_sprite(&defs[i], &index, &state, &mut built, palettes);
+                    let depth =
+                        self.build_sprite(&defs[i], &index, &state, &mut built, palettes, fonts);
                     state[i] = State::Done(depth);
                     continue;
                 }
@@ -430,6 +436,7 @@ impl<'a> Parser<'a, '_> {
         state: &[State],
         built: &mut [Option<Sprite>],
         palettes: &[Palette],
+        fonts: &[crate::Font],
     ) -> Option<usize> {
         // The sprite a chain starts from, and the depth of the chain's result.
         let base = |this: &mut Self, chain: &Chain<'a>| -> Option<(Sprite, usize)> {
@@ -465,6 +472,7 @@ impl<'a> Parser<'a, '_> {
         };
         let i = index.get(def.name.text).copied()?;
         let result = match &def.body {
+            Body::Text(text) => self.build_text(def.name, text, fonts, palettes),
             Body::Derived(chain) => base(self, chain).map(|(mut sprite, depth)| {
                 sprite.name = def.name.text.to_owned();
                 (sprite, depth)
@@ -495,6 +503,7 @@ impl<'a> Parser<'a, '_> {
                             let Some(palette) = palette else { continue };
                             match self.keys(rows, palette) {
                                 Some(keys) => out.push(Layer {
+                                    text: false,
                                     name: layer_name,
                                     keys,
                                 }),

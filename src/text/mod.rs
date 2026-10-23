@@ -5,10 +5,14 @@ mod chain;
 mod font;
 mod group;
 mod import;
+mod lettering;
 mod lex;
+mod screen;
 mod sprite;
 mod texture;
+mod themes;
 mod tiles;
+mod widgets;
 
 use std::collections::HashMap;
 
@@ -23,7 +27,7 @@ use tiles::{TilemapDef, TilesetDef};
 
 /// The directives that start a definition.
 const DIRECTIVES: &str = "`import`, `palette`, `sprite`, `texture`, `animation`, `tileset`, \
-    `tilemap`, `font`, `group` or `lint`";
+    `tilemap`, `font`, `text`, `states`, `icons`, `theme`, `screen`, `group` or `lint`";
 
 /// Parses `text`, loading the files it imports through `loader`. Returns the
 /// document, complete when there are no errors, and the errors ordered by file, then
@@ -53,6 +57,29 @@ pub(crate) fn parse(
         .enumerate()
         .map(|(i, t)| lex::lex(t, i as u32, &mut errors))
         .collect();
+    let mut generated_names = HashMap::new();
+    let mut name_bytes = 0usize;
+    for node in lexed
+        .iter()
+        .flatten()
+        .filter(|n| matches!(n.keyword(), "states" | "icons"))
+    {
+        if let Some(prefix) = node.line.tokens.get(1) {
+            for child in &node.children {
+                let index = usize::from(node.keyword() == "icons");
+                if let Some(name) = child.line.tokens.get(index) {
+                    let length = prefix.text.len() + 1 + name.text.len();
+                    if generated_names.len() >= limits.max_definitions
+                        || length > limits.max_text_bytes.saturating_sub(name_bytes)
+                    {
+                        continue;
+                    }
+                    name_bytes += length;
+                    generated_names.insert(name.pos, format!("{}.{}", prefix.text, name.text));
+                }
+            }
+        }
+    }
     let mut parser = Parser {
         limits,
         errors,
@@ -68,6 +95,12 @@ pub(crate) fn parse(
         layer_counts: HashMap::new(),
         groups: Vec::new(),
         palette_uses: chain::PaletteUses::new(),
+        generated_names: &generated_names,
+        widgets: Vec::new(),
+        extra_definitions: 0,
+        definitions_seen: 0,
+        themes: Vec::new(),
+        screens: Vec::new(),
     };
     // Imported definitions take the place of their `import`.
     let mut walk = Walk {
@@ -115,7 +148,7 @@ impl<'a> Walk<'_, 'a> {
                 }
                 continue;
             }
-            if self.count == parser.limits.max_definitions {
+            if self.count + parser.extra_definitions >= parser.limits.max_definitions {
                 parser.errors.push(node.line.first().error(
                     ErrorCode::LimitExceeded,
                     format!(
@@ -126,6 +159,7 @@ impl<'a> Walk<'_, 'a> {
                 return false;
             }
             self.count += 1;
+            parser.definitions_seen = self.count;
             if let Err(e) = parser.definition(node) {
                 parser.errors.push(e);
             }
@@ -169,6 +203,12 @@ impl RampDef<'_> {
 }
 
 struct Parser<'a, 'l> {
+    screens: Vec<screen::ScreenDef<'a>>,
+    themes: Vec<themes::ThemeDef<'a>>,
+    generated_names: &'a HashMap<Position, String>,
+    widgets: Vec<widgets::WidgetDef<'a>>,
+    extra_definitions: usize,
+    definitions_seen: usize,
     limits: &'l Limits,
     errors: Vec<Error>,
     palettes: Vec<PaletteDef<'a>>,
@@ -205,7 +245,11 @@ impl<'a> Header<'a> {
         let name = *tokens
             .get(1)
             .ok_or_else(|| tokens[0].end_error(format!("Expected a name for the {what}")))?;
-        check_name(name)?;
+        if what == "sprite" {
+            check_sprite_name(name)?;
+        } else {
+            check_name(name)?;
+        }
         let mut args = Vec::new();
         let mut options = Vec::new();
         for &token in &tokens[2..] {
@@ -286,6 +330,18 @@ fn check_name(token: Token) -> Parsed<()> {
     Ok(())
 }
 
+fn check_sprite_name(token: Token) -> Parsed<()> {
+    let mut offset = 0;
+    for part in token.text.split('.') {
+        check_name(Token {
+            text: part,
+            pos: token.at(offset),
+        })?;
+        offset += part.chars().count() + 1;
+    }
+    Ok(())
+}
+
 /// The color of `base=`: opaque, `#rrggbb`.
 fn parse_base(token: Token) -> Parsed<Color> {
     let invalid = || {
@@ -354,6 +410,11 @@ impl<'a> Parser<'a, '_> {
             "tileset" => self.tileset(node),
             "tilemap" => self.tilemap(node),
             "font" => self.font(node),
+            "text" => self.text_sprite(node),
+            "states" => self.states(node),
+            "icons" => self.icons(node),
+            "theme" => self.theme(node),
+            "screen" => self.screen(node),
             "texture" => self.texture(node),
             "lint" => self.lint(node),
             "group" => self.group(node),
@@ -639,6 +700,16 @@ impl<'a> Parser<'a, '_> {
                 .collect()
         };
         let mut defs = Vec::new();
+        for screen in &self.screens {
+            defs.push(Def {
+                kind: Kind::Screen,
+                name: screen.name.text.into(),
+                pos: screen.name.pos,
+                allow: allow(Kind::Screen, screen.name),
+                deps: Vec::new(),
+                detail: Detail::Other,
+            });
+        }
         for p in &self.palettes {
             defs.push(Def {
                 kind: Kind::Palette,
@@ -702,6 +773,7 @@ impl<'a> Parser<'a, '_> {
             .into_iter()
             .chain(self.group_sets())
             .chain(self.tileset_sets())
+            .chain(self.widget_sets())
         {
             if !defs.iter().any(|d| d.kind == kind && d.pos == name.pos) {
                 defs.push(Def {
@@ -737,16 +809,22 @@ impl<'a> Parser<'a, '_> {
     /// Resolves names and builds the document, recording errors.
     fn resolve(&mut self) -> Document {
         let palettes = self.resolve_palettes();
-        let sprites = self.resolve_sprites(&palettes);
+        let themes = self.resolve_themes(&palettes);
+        let fonts = self.resolve_fonts();
+        let sprites = self.resolve_sprites(&palettes, &fonts);
         let mut budget = self.limits.max_image_pixels;
         let sprites = self.spend(sprites, &mut budget);
         let (animations, frame_sprites) = self.resolve_animations(&palettes, &sprites);
         let frame_sprites = self.spend(frame_sprites, &mut budget);
         let tilesets = self.resolve_tilesets(&palettes, &sprites);
         let tilemaps = self.resolve_tilemaps(&tilesets);
-        let fonts = self.resolve_fonts();
         let groups = self.resolve_groups(&sprites);
+        let (states, icon_sets) = self.resolve_widgets(&sprites);
+        let screens = self.resolve_screens(&palettes, &sprites, &mut budget);
         Document {
+            screens,
+            theme_bases: palettes.clone(),
+            themes,
             palettes,
             sprites,
             frame_sprites,
@@ -755,6 +833,8 @@ impl<'a> Parser<'a, '_> {
             tilemaps,
             fonts,
             groups,
+            states,
+            icon_sets,
             sources: Sources::default(),
         }
     }

@@ -70,6 +70,7 @@ impl Insets {
 /// One layer of a sprite: a key for each pixel, row by row, or [`EMPTY`].
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct Layer {
+    pub text: bool,
     pub name: Option<String>,
     pub keys: Vec<char>,
 }
@@ -177,7 +178,7 @@ impl Sprite {
         image
     }
 
-    fn derive(
+    pub(crate) fn derive(
         &self,
         op: &str,
         width: u32,
@@ -201,6 +202,7 @@ impl Sprite {
                     }
                 }
                 Layer {
+                    text: layer.text,
                     name: layer.name.clone(),
                     keys,
                 }
@@ -380,6 +382,7 @@ impl Sprite {
         sprite.layers.insert(
             0,
             Layer {
+                text: false,
                 name: Some("outline".into()),
                 keys,
             },
@@ -437,6 +440,7 @@ mod tests {
             height: rows.len() as u32,
             palette,
             layers: vec![Layer {
+                text: false,
                 name: None,
                 keys: rows.iter().flat_map(|r| r.chars()).collect(),
             }],
