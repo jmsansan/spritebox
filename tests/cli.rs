@@ -37,6 +37,73 @@ const COIN: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/examples/coin.spritebox
 const BAD: &str = "palette p\n  k #000\nsprite s 2x1 palette=p\n  kx\n";
 
 #[test]
+fn background_selection_camera_modes_and_no_partial_writes() {
+    let dir = temp_dir("backgrounds");
+    let input = write(
+        &dir,
+        "scene.spritebox",
+        include_str!("fixtures/backgrounds/scene.spritebox"),
+    );
+    for mode in ["both", "flat", "layers", "none"] {
+        let out = dir.join(mode);
+        let rendered = spritebox(&[
+            "render",
+            &input,
+            "--out",
+            out.to_str().unwrap(),
+            "--background",
+            "scene",
+            "--camera",
+            "-3,1",
+            "--background-mode",
+            mode,
+            "--theme",
+            "all",
+        ]);
+        assert_eq!(rendered.status.code(), Some(0), "{}", stderr(&rendered));
+        assert_eq!(
+            out.join("background-0000.png").exists(),
+            matches!(mode, "both" | "flat")
+        );
+        assert_eq!(
+            out.join("background-0000-layer-0000.png").exists(),
+            matches!(mode, "both" | "layers")
+        );
+        assert!(out.join("atlas.png").exists());
+        assert!(out.join("preview.png").exists());
+        let json = std::fs::read_to_string(out.join("spritebox.json")).unwrap();
+        if mode != "none" {
+            assert!(json.contains("\"camera\": [-3, 1]") || mode == "layers");
+        }
+    }
+    let bad = dir.join("not-created");
+    for arguments in [
+        vec!["--background", "missing"],
+        vec!["--background", "scene", "--background", "scene"],
+        vec!["--camera", "x,0"],
+        vec!["--background-mode", "bad"],
+    ] {
+        let mut args = vec!["render", &input, "--out", bad.to_str().unwrap()];
+        args.extend(arguments);
+        let failed = spritebox(&args);
+        assert!(!failed.status.success());
+        assert!(!bad.exists());
+    }
+    assert_eq!(
+        spritebox(&["check", &input, "--camera", "0,0"])
+            .status
+            .code(),
+        Some(2)
+    );
+    assert_eq!(
+        spritebox(&["lint", &input, "--background-mode", "both"])
+            .status
+            .code(),
+        Some(2)
+    );
+}
+
+#[test]
 fn check_valid_file() {
     let out = spritebox(&["check", COIN]);
     assert_eq!(out.status.code(), Some(0));
@@ -130,6 +197,7 @@ fn render_writes_files() {
     }
     let doc = spritebox::Document::parse(&std::fs::read_to_string(COIN).unwrap()).unwrap();
     let options = spritebox::ExportOptions {
+        backgrounds: Default::default(),
         atlas: spritebox::AtlasOptions {
             padding: 2,
             extrude: false,

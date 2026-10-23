@@ -104,6 +104,8 @@ impl Group {
 /// ```
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Document {
+    pub(crate) surfaces: Vec<crate::Surface>,
+    pub(crate) backgrounds: Vec<crate::Background>,
     pub(crate) screens: Vec<crate::Screen>,
     pub(crate) themes: Vec<crate::Theme>,
     pub(crate) theme_bases: Vec<Palette>,

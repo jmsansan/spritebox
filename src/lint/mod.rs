@@ -1,5 +1,6 @@
 //! Lint: warnings for art that is valid but does not follow pixel-art practice.
 
+mod backgrounds;
 mod lines;
 mod palette;
 mod screens;
@@ -64,11 +65,13 @@ pub enum LintCode {
     ScreenOverlap,
     /// An item is not aligned to its screen's declared grid.
     OffGrid,
+    /// A background placement is fully clipped by its native layer or clip rectangle.
+    BackgroundClipped,
 }
 
 impl LintCode {
     /// Every code, in order.
-    pub const ALL: [LintCode; 19] = [
+    pub const ALL: [LintCode; 20] = [
         LintCode::OrphanPixel,
         LintCode::Jaggy,
         LintCode::DoubleOutline,
@@ -88,6 +91,7 @@ impl LintCode {
         LintCode::ScreenBounds,
         LintCode::ScreenOverlap,
         LintCode::OffGrid,
+        LintCode::BackgroundClipped,
     ];
 
     /// The code's stable name in `snake_case`, such as `"orphan_pixel"`.
@@ -112,6 +116,7 @@ impl LintCode {
             LintCode::ScreenBounds => "screen_bounds",
             LintCode::ScreenOverlap => "screen_overlap",
             LintCode::OffGrid => "off_grid",
+            LintCode::BackgroundClipped => "background_clipped",
         }
     }
 }
@@ -265,6 +270,8 @@ pub(crate) enum Kind {
     States,
     Icons,
     Screen,
+    Surface,
+    Background,
 }
 
 /// Where definitions are in the text, and what lint they allow: what a [`Document`]
@@ -566,6 +573,7 @@ pub(crate) fn run(document: &Document, options: &LintOptions, limits: &Limits) -
     sets::check(document, &index, &mut sink);
     palette::check(document, &index, options, &mut sink);
     screens::check(document, options, limits, &mut sink);
+    backgrounds::check(document, &mut sink);
     sink.finish()
 }
 

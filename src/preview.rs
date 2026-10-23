@@ -6,6 +6,8 @@ use crate::{Color, Document, Image, Limits, LintCode, LintOptions, Result, Sprit
 /// How a preview sheet is drawn.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PreviewOptions {
+    /// Background selection, camera and visibility; thumbnails are never enlarged.
+    pub backgrounds: crate::BackgroundExportOptions,
     /// Screen pixels for each sprite pixel, 1..=64. Default 4.
     pub scale: u32,
     /// Lines between sprite pixels, drawn when `scale` is at least 4. Default true.
@@ -24,6 +26,7 @@ pub struct PreviewOptions {
 impl Default for PreviewOptions {
     fn default() -> Self {
         Self {
+            backgrounds: crate::BackgroundExportOptions::default(),
             scale: 4,
             grid: true,
             max_width: 1024,
@@ -104,6 +107,11 @@ pub(crate) fn sheet(
         return Err(crate::Error::invalid("Preview scale must be 1..=64"));
     }
     let mut sections = Vec::new();
+    let mut scene_budget = crate::scene::Budget::new(limits);
+    let has_scenes = !document.backgrounds.is_empty() || !document.surfaces.is_empty();
+    if has_scenes {
+        scene_budget.pixels(document.scene_storage())?;
+    }
     let lint = options
         .lint
         .then(|| document.lint_with(&LintOptions::default(), limits));
@@ -295,6 +303,102 @@ pub(crate) fn sheet(
             groups,
         });
     }
+    if has_scenes {
+        scene_budget.pixels(
+            sections
+                .iter()
+                .flat_map(|s| &s.groups)
+                .flat_map(|g| &g.items)
+                .map(|i| i.image.width() as u64 * i.image.height() as u64)
+                .sum(),
+        )?;
+        if let Some(name) = &options.backgrounds.selection {
+            if document.background(name).is_none() {
+                return Err(crate::Error::new(
+                    crate::ErrorCode::UnknownName,
+                    "Unknown preview background",
+                ));
+            }
+        }
+        let mut groups = Vec::new();
+        if options.backgrounds.mode != crate::BackgroundMode::None {
+            for bg in document.backgrounds.iter().filter(|b| {
+                options
+                    .backgrounds
+                    .selection
+                    .as_deref()
+                    .is_none_or(|n| b.name() == n)
+            }) {
+                let natives = bg.native_layers(document, limits, &mut scene_budget)?;
+                let view = bg.flatten(
+                    &natives,
+                    &crate::BackgroundRenderOptions {
+                        camera: options.backgrounds.camera,
+                    },
+                    limits,
+                    &mut scene_budget,
+                )?;
+                let divisor = 1
+                    .max(view.width().div_ceil(320))
+                    .max(view.height().div_ceil(180));
+                let (w, h) = (
+                    view.width().div_ceil(divisor),
+                    view.height().div_ceil(divisor),
+                );
+                scene_budget.pixels(w as u64 * h as u64)?;
+                scene_budget.work(w as u64 * h as u64)?;
+                let mut thumb = Image::new_with(w, h, limits)?;
+                for y in 0..h {
+                    for x in 0..w {
+                        thumb.set_pixel(
+                            x,
+                            y,
+                            view.pixel(
+                                (x * divisor).min(view.width() - 1),
+                                (y * divisor).min(view.height() - 1),
+                            )
+                            .unwrap(),
+                        );
+                    }
+                }
+                let freed = view.width() as u64 * view.height() as u64
+                    + natives
+                        .iter()
+                        .map(|i| i.width() as u64 * i.height() as u64)
+                        .sum::<u64>();
+                scene_budget.pixels += freed;
+                let mut item = Item::new(
+                    thumb,
+                    format!(
+                        "{}x{} camera {},{}",
+                        bg.width,
+                        bg.height,
+                        options.backgrounds.camera.0,
+                        options.backgrounds.camera.1
+                    ),
+                );
+                item.scale = Some(1);
+                if lint.as_ref().is_some_and(|l| {
+                    l.warnings.iter().any(|w| {
+                        w.code == LintCode::BackgroundClipped
+                            && w.sprite.as_deref() == Some(bg.name())
+                    })
+                }) {
+                    item.flag = Some(LINES);
+                }
+                groups.push(Group {
+                    label: bg.name.clone(),
+                    items: vec![item],
+                });
+            }
+        }
+        if !groups.is_empty() {
+            sections.push(Section {
+                title: "Backgrounds".into(),
+                groups,
+            });
+        }
+    }
     if sections.is_empty() {
         sections.push(Section {
             title: "Nothing to show".into(),
@@ -304,7 +408,12 @@ pub(crate) fn sheet(
     if let Some(lint) = &lint {
         sections.push(legend(lint));
     }
-    draw_sections(&sections, options, limits)
+    draw_sections(
+        &sections,
+        options,
+        limits,
+        has_scenes.then_some(&mut scene_budget),
+    )
 }
 
 /// The color that marks a lint code on a sprite, if it is drawn.
@@ -404,7 +513,12 @@ fn group_layout(
     (offsets, width, TEXT_HEIGHT + LABEL_GAP + y + row_height)
 }
 
-fn draw_sections(sections: &[Section], options: &PreviewOptions, limits: &Limits) -> Result<Image> {
+fn draw_sections(
+    sections: &[Section],
+    options: &PreviewOptions,
+    limits: &Limits,
+    mut scene_budget: Option<&mut crate::scene::Budget>,
+) -> Result<Image> {
     let inner = options.max_width.saturating_sub(2 * MARGIN).max(1);
     // Lay out first, in u64 so that huge documents fail the size check, not overflow.
     let mut placements: Vec<(u64, Vec<Placed>)> = Vec::new();
@@ -448,6 +562,10 @@ fn draw_sections(sections: &[Section], options: &PreviewOptions, limits: &Limits
         sheet_height.min(u32::MAX as u64) as u32,
     );
     Image::check_size(width, height, limits)?;
+    if let Some(b) = scene_budget.as_mut() {
+        b.pixels(width as u64 * height as u64)?;
+        b.work(width as u64 * height as u64)?;
+    }
     let mut image = Image::blank(width, height);
     image.fill_rect(0, 0, width, height, BACKGROUND);
     for (section, (title_y, placed)) in sections.iter().zip(&placements) {

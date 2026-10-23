@@ -11,6 +11,7 @@ use crate::{
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ExportOptions {
     pub atlas: AtlasOptions,
+    pub backgrounds: crate::BackgroundExportOptions,
 }
 
 /// A tileset's texture and what the metadata says of it.
@@ -74,6 +75,8 @@ pub struct FontExport {
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub struct Export {
+    pub(crate) scene_work: u64,
+    pub backgrounds: Vec<crate::BackgroundExport>,
     pub themes: Vec<crate::ThemeExport>,
     pub atlas: Atlas,
     pub tilesets: Vec<TilesetExport>,
@@ -86,7 +89,126 @@ pub const ATLAS_FILE: &str = "atlas.png";
 /// The name of the metadata file.
 pub const METADATA_FILE: &str = "spritebox.json";
 
+pub(crate) fn preflight_paths(
+    doc: &Document,
+    options: &ExportOptions,
+    limits: &Limits,
+    all_themes: bool,
+) -> Result<()> {
+    if let Some(name) = &options.backgrounds.selection {
+        if doc.background(name).is_none() {
+            return Err(Error::new(
+                crate::ErrorCode::UnknownName,
+                format!("Unknown background `{name}`"),
+            ));
+        }
+    }
+    let mut seen = std::collections::HashSet::new();
+    let mut add = |name: String| -> Result<()> {
+        if seen.len() >= limits.max_export_files {
+            return Err(Error::limit("More than the export file limit"));
+        }
+        if !seen.insert(name.to_ascii_lowercase()) {
+            return Err(Error::invalid(format!(
+                "Output filenames collide at `{name}`"
+            )));
+        }
+        Ok(())
+    };
+    add(ATLAS_FILE.into())?;
+    add(METADATA_FILE.into())?;
+    for t in &doc.tilesets {
+        add(format!("tileset-{}.png", t.name))?;
+    }
+    for f in &doc.fonts {
+        add(format!("font-{}.ttf", f.name))?;
+    }
+    let bgs = crate::background_export::file_names(doc, &options.backgrounds);
+    for name in &bgs {
+        add(name.clone())?;
+    }
+    if all_themes {
+        for (i, t) in doc.themes.iter().enumerate() {
+            add(format!("atlas-{}.png", t.name))?;
+            for set in &doc.tilesets {
+                add(format!("tileset-{}-{}.png", set.name, t.name))?;
+            }
+            for name in &bgs {
+                add(format!(
+                    "{}-theme-{i:04}.png",
+                    name.strip_suffix(".png").unwrap()
+                ))?;
+            }
+        }
+    }
+    Ok(())
+}
+
 impl Export {
+    /// Planned relative paths without encoding any image data.
+    pub fn file_names(&self) -> Vec<String> {
+        let mut names = vec![ATLAS_FILE.into()];
+        names.extend(self.tilesets.iter().map(|t| t.file.clone()));
+        names.extend(self.fonts.iter().map(|f| f.file.clone()));
+        let backgrounds = |b: &[crate::BackgroundExport]| {
+            b.iter()
+                .flat_map(|b| {
+                    b.flat
+                        .iter()
+                        .map(|f| f.file.clone())
+                        .chain(b.layers.iter().map(|l| l.file.clone()))
+                })
+                .collect::<Vec<_>>()
+        };
+        names.extend(backgrounds(&self.backgrounds));
+        for t in &self.themes {
+            names.push(t.file.clone());
+            names.extend(t.tilesets.iter().map(|t| t.file.clone()));
+            names.extend(backgrounds(&t.backgrounds));
+        }
+        names.push(METADATA_FILE.into());
+        names
+    }
+    /// Image cells retained by this export, useful when sharing a scene budget
+    /// with a preview or another in-memory output operation.
+    pub fn image_pixels(&self) -> u64 {
+        let bg = |b: &[crate::BackgroundExport]| {
+            b.iter()
+                .map(|b| {
+                    b.flat
+                        .as_ref()
+                        .map_or(0, |f| f.image.width() as u64 * f.image.height() as u64)
+                        + b.layers
+                            .iter()
+                            .map(|l| l.image.width() as u64 * l.image.height() as u64)
+                            .sum::<u64>()
+                })
+                .sum::<u64>()
+        };
+        self.atlas.image.width() as u64 * self.atlas.image.height() as u64
+            + self
+                .tilesets
+                .iter()
+                .map(|t| t.image.width() as u64 * t.image.height() as u64)
+                .sum::<u64>()
+            + bg(&self.backgrounds)
+            + self
+                .themes
+                .iter()
+                .map(|t| {
+                    t.image.width() as u64 * t.image.height() as u64
+                        + t.tilesets
+                            .iter()
+                            .map(|t| t.image.width() as u64 * t.image.height() as u64)
+                            .sum::<u64>()
+                        + bg(&t.backgrounds)
+                })
+                .sum::<u64>()
+    }
+    /// Scene work already consumed while constructing this export.
+    pub fn scene_work(&self) -> u64 {
+        self.scene_work
+    }
     /// The metadata as JSON: the atlas and animations, as [`Atlas::to_json`] writes
     /// them, then `tilesets` and `tilemaps`. See the README for the form.
     pub fn to_json(&self) -> String {
@@ -104,6 +226,7 @@ impl Export {
                     w.string(Some(&tileset.name), &tileset.file);
                 }
                 w.close('}');
+                crate::background_export::write_json(&mut w, &theme.backgrounds);
                 w.close('}');
             }
             w.close('}');
@@ -160,6 +283,7 @@ impl Export {
             w.close('}');
         }
         w.close('}');
+        crate::background_export::write_json(&mut w, &self.backgrounds);
         w.close('}');
         w.finish()
     }
@@ -174,11 +298,13 @@ impl Export {
         for f in &self.fonts {
             files.push((f.file.clone(), f.ttf.clone()));
         }
+        crate::background_export::add_files(&mut files, &self.backgrounds);
         for theme in &self.themes {
             files.push((theme.file.clone(), crate::png::encode(&theme.image)));
             for tileset in &theme.tilesets {
                 files.push((tileset.file.clone(), crate::png::encode(&tileset.image)));
             }
+            crate::background_export::add_files(&mut files, &theme.backgrounds);
         }
         files.push((METADATA_FILE.to_owned(), self.to_json().into_bytes()));
         files
@@ -190,7 +316,9 @@ pub(crate) fn build(
     options: &ExportOptions,
     limits: &Limits,
 ) -> Result<Export> {
-    build_copies(document, options, limits, 1)
+    let mut budget = crate::scene::Budget::new(limits);
+    budget.pixels(document.scene_storage())?;
+    build_copies(document, options, limits, 1, &mut budget)
 }
 
 pub(crate) fn build_copies(
@@ -198,7 +326,37 @@ pub(crate) fn build_copies(
     options: &ExportOptions,
     limits: &Limits,
     copies: u64,
+    scene_budget: &mut crate::scene::Budget,
 ) -> Result<Export> {
+    preflight_paths(document, options, limits, false)?;
+    let mut names = vec![ATLAS_FILE.to_owned(), METADATA_FILE.to_owned()];
+    names.extend(
+        document
+            .tilesets
+            .iter()
+            .map(|t| format!("tileset-{}.png", t.name)),
+    );
+    names.extend(
+        document
+            .fonts
+            .iter()
+            .map(|t| format!("font-{}.ttf", t.name)),
+    );
+    names.extend(crate::background_export::file_names(
+        document,
+        &options.backgrounds,
+    ));
+    let mut unique = std::collections::HashSet::new();
+    for name in &names {
+        if !unique.insert(name.to_ascii_lowercase()) {
+            return Err(Error::invalid(format!(
+                "Output filenames collide at `{name}`"
+            )));
+        }
+    }
+    if names.len() > limits.max_export_files {
+        return Err(Error::limit("More than the export file limit"));
+    }
     let atlas = document.atlas_with(&options.atlas, limits)?;
     let pad = options.atlas.padding;
     let max = options.atlas.max_side;
@@ -227,6 +385,11 @@ pub(crate) fn build_copies(
     if files > limits.max_export_files as u64 {
         return Err(Error::limit("More than the export file limit"));
     }
+    if !document.backgrounds.is_empty() || !document.surfaces.is_empty() {
+        scene_budget.pixels(pixels)?;
+    }
+    let backgrounds =
+        crate::background_export::build(document, &options.backgrounds, limits, scene_budget)?;
     let mut tilesets = Vec::with_capacity(document.tilesets.len());
     for t in &document.tilesets {
         let (w, h) = t.padded_size(pad);
@@ -270,6 +433,8 @@ pub(crate) fn build_copies(
         })
         .collect::<Result<Vec<_>>>()?;
     Ok(Export {
+        scene_work: limits.max_scene_work - scene_budget.work,
+        backgrounds,
         themes: Vec::new(),
         atlas,
         tilesets,

@@ -1,0 +1,107 @@
+; Finite background: palette-key sky, two profile distances, weighted trees,
+; mixed palettes, cropped map, repeating texture and exact rational parallax.
+; Sparse tree/circuit pixels are intentional at this small native resolution.
+lint allow orphan_pixel jaggy double_outline banding near_duplicate_color
+palette world
+  . transparent
+  s #172d48
+  h #627da0
+  d #e5ac84
+  m #fff1bd
+  f #586881
+  g #345c54
+  t #193f3a
+  k #112b30
+  w #4c9690
+palette lamps
+  l #ffc77e
+  b #263a4d
+
+surface sky 320x180 palette=world
+  gradient dusk axis=y mode=blend dither=bayer4
+    stop 0 s
+    stop 85 h
+    stop 150 d
+  ellipse moon at=242,16 size=28x28 key=m
+surface distant 320x180 palette=world seed=7
+  profile mountains key=f baseline=144 amplitude=56 cell=64 octaves=4 roughness=70 seed=11
+surface near 320x180 palette=world seed=7
+  profile ridge key=g baseline=162 amplitude=28 cell=32 octaves=3 roughness=45 seed=5
+surface buildings 96x80 palette=world
+  rect tower at=8,24 size=28x56 key=k
+  rect block at=43,38 size=45x42 key=t
+  polygon roof key=k points=38,38 65,21 92,38
+  line aerial from=22,5 to=22,24 key=k
+sprite tree 9x14 palette=world
+  ....t....
+  ...ttt...
+  ..ttttt..
+  .ttttttt.
+  ...ttt...
+  ..ttttt..
+  .ttttttt.
+  ttttttttt
+  ...kkk...
+  ...kkk...
+  ...kkk...
+  ...kkk...
+  ...kkk...
+  ...kkk...
+sprite window 2x3 palette=lamps
+  ll
+  ll
+  bb
+texture water 32x8 palette=world seed=12
+  noise cell=8 octaves=2 roughness=50
+  ramp k w
+  dither bayer4
+tileset pavement 4x4 palette=world
+  tile slab
+    kkkk
+    kttt
+    kttt
+    kttt
+tilemap promenade tileset=pavement
+  legend
+    p slab solid
+  map
+    pppppppppppppppp
+    pppppppppppppppp
+
+background harbor 320x180 seed=7
+  layer sky 320x180 parallax=0/1,0/1
+    place surface sky at=0,0
+  layer mountains 320x180 repeat=x parallax=1/4,0/1
+    place surface distant at=0,0
+  layer hills 320x180 repeat=x parallax=1/2,0/1
+    place surface near at=0,0
+  layer town 96x80 at=180,87 repeat=x parallax=3/4,0/1
+    place surface buildings at=0,0
+    place sprite window at=16,36
+    place sprite window at=26,36
+    place sprite window at=16,50
+    place sprite window at=26,50
+  layer trees 320x180 repeat=x parallax=1/1,0/1
+    scatter grove count=12 spacing=18 attempts=1024 seed=4 baseline=near(ridge) mask=near(g)
+      variant tree weight=3
+      variant tree:flip_x weight=1
+  layer water 32x8 at=0,172 repeat=x parallax=1/1,0/1
+    place sprite water at=0,0
+  layer walk 48x4 at=0,168 repeat=x parallax=1/1,0/1
+    place tilemap promenade at=0,0 crop=8,0,48,4
+
+theme day of world
+  s #5d96b3
+  h #adc9c2
+  d #f1d4a5
+  f #749695
+  g #61816a
+theme night of world
+  s #080e24
+  h #263151
+  d #795d78
+  f #252e4e
+  g #1f4243
+  m #cedcf0
+  w #325373
+  t #193f3a00

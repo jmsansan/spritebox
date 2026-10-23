@@ -1121,13 +1121,16 @@ fn every_sprite_check_before_and_after() {
         reported.push(w.code);
     }
     reported.dedup();
-    // Spatial screen rules have triggering and clean cases in tests/ui.rs.
+    // Composition rules have triggering and clean cases in ui.rs/backgrounds.rs.
     let codes: Vec<_> = LintCode::ALL
         .into_iter()
         .filter(|c| {
             !matches!(
                 c,
-                LintCode::ScreenBounds | LintCode::ScreenOverlap | LintCode::OffGrid
+                LintCode::ScreenBounds
+                    | LintCode::ScreenOverlap
+                    | LintCode::OffGrid
+                    | LintCode::BackgroundClipped
             )
         })
         .collect();

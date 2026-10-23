@@ -46,6 +46,7 @@ tilemap level
 fn every_value_of_the_metadata() {
     let doc: Document = GAME.parse().unwrap();
     let options = ExportOptions {
+        backgrounds: Default::default(),
         atlas: AtlasOptions {
             padding: 1,
             ..AtlasOptions::default()

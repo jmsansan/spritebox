@@ -188,6 +188,9 @@
 #![forbid(unsafe_code)]
 
 mod atlas;
+mod background;
+mod background_builder;
+mod background_export;
 mod document;
 mod effects;
 mod error;
@@ -202,8 +205,10 @@ mod lint;
 mod oklab;
 pub mod png;
 mod preview;
+mod scene;
 mod screen;
 mod sprite;
+mod surface;
 mod text;
 mod texture;
 mod themes;
@@ -212,6 +217,16 @@ mod ttf;
 mod widgets;
 
 pub use atlas::{Atlas, AtlasAnimation, AtlasFrame, AtlasOptions, Rect, Region};
+pub use background::{
+    Anchor, Background, BackgroundLayer, BackgroundPlacement, BackgroundRenderOptions,
+    LayerOptions, PlacementOptions, Ratio, Repeat, ScatterAmount, ScatterOptions, SourceRef,
+    WeightedVariant,
+};
+pub use background_builder::BackgroundBuilder;
+pub use background_export::{
+    BackgroundExport, BackgroundExportOptions, BackgroundFlatExport, BackgroundLayerExport,
+    BackgroundMode,
+};
 pub use document::{Animation, Document, Frame, Group, check, check_with_loader};
 pub use effects::{Fill, Shadow};
 pub use error::{Error, ErrorCode, Position, Result};
@@ -222,8 +237,13 @@ pub use lettering::{Align, TextOptions};
 pub use limits::Limits;
 pub use lint::{Lint, LintCode, LintOptions, Warning};
 pub use preview::PreviewOptions;
+pub use scene::scene_seed;
 pub use screen::{Screen, ScreenItem};
 pub use sprite::{Insets, Palette, Ramp, Sprite};
+pub use surface::{
+    Axis, Gradient, GradientMode, GradientStop, Primitive, Profile, ProfileOptions, Surface,
+    SurfaceBuilder,
+};
 pub use texture::{Dither, Noise, bayer};
 pub use themes::{Theme, ThemeExport};
 pub use tiles::{BLOB_MASKS, Piece, Scheme, Terrain, Tilemap, Tileset, neighbours, reduce};
