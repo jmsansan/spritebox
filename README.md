@@ -293,6 +293,8 @@ sprite rune 16x16 palette=rank
   layer glyph = glyph_frost     ; keeps palette frost
 ```
 
+![A stone in palette stone, a glyph in palette frost, and the two runes made of them, the second with its glyph swapped to palette ember](https://raw.githubusercontent.com/jmsansan/spritebox/main/docs/layer-palettes.png)
+
 Each layer is colored by its own palette, then the layers are composited as above.
 `flip_*`, `rot*`, `offset`, `pad`, `size` and `shadow` work on such a sprite;
 `outline(KEY)` and `shadow(KEY,...)` take `KEY` from the sprite's declared palette.
@@ -346,6 +348,8 @@ same chains name the frames of animations and the layers of sprites.
 | `size(WxH[,tile])` | Resize a panel while retaining its corners and slice insets; stretch by default |
 | `shadow(KEY,dx,dy[,hard\|long])` | An offset silhouette below the sprite; grow the canvas and slice borders on that side. Offsets are -8..=8; `long` joins the original and offset silhouettes |
 
+![One rune at 1x, scale(2) and scale(3)](https://raw.githubusercontent.com/jmsansan/spritebox/main/docs/scale.png)
+
 ```text
 sprite coin_night = coin:swap(dusk)
 sprite arrow_down = arrow_right:rot90
@@ -366,6 +370,8 @@ background menu 480x270
   layer props 480x270
     place sprite graveyard.tomb2 at=40,200 anchor=bottom-left
 ```
+
+![A tilemap's tombstone tile, and the same tile as a sprite, scaled up in an inventory slot](https://raw.githubusercontent.com/jmsansan/spritebox/main/docs/tile-sprites.png)
 
 A sprite whose name is the same dotted name wins. Only `tile` entries are sprites
 this way, not a terrain's pieces or variants. An unknown tileset or tile is an
@@ -649,6 +655,8 @@ text loot font=hud palette=ui color=g width=120
   {b}+12 %{} damage
 ```
 
+![The text "+12 % damage" with the number in blue](https://raw.githubusercontent.com/jmsansan/spritebox/main/docs/text-colors.png)
+
 Kerning, wrapping and alignment are those of the same text in one color: only the
 keys of the glyphs change. A key the palette lacks is an error at the key. Any
 other `{` is an error; write the whole word `U+007B` for a literal `{`. Rust has
@@ -769,6 +777,19 @@ Backgrounds stay outside sprite atlases; their PNGs retain native dimensions.
 spritebox render examples/backgrounds.spritebox --out out/backgrounds --theme all
 spritebox render examples/backgrounds.spritebox --out out/camera --background harbor --camera -64,0 --background-mode both
 ```
+
+The concept art of a graveyard tower defense, in
+[examples/first_game.spritebox](examples/first_game.spritebox): a board of tiles,
+stroked range rings and runes, placed whole inside the interface mockup, beside a
+tooltip with a scaled rune and a two-color loot text. Each picture in this README of
+a 0.6 feature is a panel of
+[examples/first_game_gallery.spritebox](examples/first_game_gallery.spritebox),
+written with `spritebox render examples/first_game_gallery.spritebox --out out/gallery
+--background-scale 4`.
+
+![An interface mockup: a graveyard board with tombstones, range rings and runes, placed inside it, and a tooltip](https://raw.githubusercontent.com/jmsansan/spritebox/main/docs/first-game-mockup.png)
+
+![Filled rectangles and ellipses, then their 1- and 2-pixel strokes; a ring keeps what is inside it](https://raw.githubusercontent.com/jmsansan/spritebox/main/docs/strokes.png)
 
 See [the background reference](docs/backgrounds.md) for grammar, Rust builders,
 coverage rules, seed vectors, resource budgets and the reconstruction schema.

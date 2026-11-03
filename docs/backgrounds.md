@@ -92,6 +92,8 @@ background shop 600x270
     place background board layer=units at=8,8 crop=0,0,128,128
 ```
 
+![A board background placed whole inside an interface mockup](https://raw.githubusercontent.com/jmsansan/spritebox/main/docs/first-game-mockup.png)
+
 `place background NAME [layer=LAYER] at=X,Y [crop=...] [anchor=...]` draws another
 background into a layer. Without `layer=`, the source is the placed background's
 flat image at camera 0,0; with it, only that layer, as it appears in that flat
@@ -159,6 +161,8 @@ signed area are required; repeated vertices, intersections and overlapping edges
 are errors. Reversing winding preserves coverage. Ellipses sample pixel centers
 inside a positive bounding box using exact wide integer arithmetic. None of these
 operations adds antialiasing or intermediate RGB values.
+
+![Filled shapes, their strokes 1 and 2 pixels wide, and a ring over another color](https://raw.githubusercontent.com/jmsansan/spritebox/main/docs/strokes.png)
 
 `stroke=N` (N >= 1) on a `rect` or an `ellipse` paints only the band N pixels wide
 inside the shape's edge: exactly the pixels of the filled shape minus those of the

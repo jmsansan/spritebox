@@ -3,7 +3,8 @@
 ## 0.6.0
 
 The limits found while drawing the concept art of the first game made with
-spritebox (#55). `examples/first_game.spritebox` uses every addition.
+spritebox (#55). `examples/first_game.spritebox` uses every addition, and
+`examples/first_game_gallery.spritebox` draws the README's picture of each.
 
 ### Added
 

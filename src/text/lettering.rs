@@ -9,6 +9,9 @@ pub(super) struct TextDef<'a> {
     pub color: Token<'a>,
     pub options: TextOptions,
     pub lines: Vec<Vec<Lettered>>,
+    /// Every `{KEY}`, with where its key is written, including those that color no
+    /// character.
+    pub switches: Vec<(char, Position)>,
 }
 
 /// A character of a text, where it is written, and the key that `{KEY}` switched to
@@ -72,6 +75,7 @@ impl<'a> Parser<'a, '_> {
         let mut lines = Vec::new();
         // The color that `{KEY}` switched to, which lasts across lines until `{}`.
         let mut switched: Option<(char, Position)> = None;
+        let mut switches = Vec::new();
         for child in &node.children {
             let raw = child.line.raw.get(indent..).unwrap_or("").trim_end();
             let mut line = Vec::new();
@@ -125,6 +129,7 @@ impl<'a> Parser<'a, '_> {
                             }
                             (Some(&key), Some('}')) if key != ' ' && key != '{' => {
                                 switched = Some((key, at(column + 1)));
+                                switches.push((key, at(column + 1)));
                                 i += 3;
                             }
                             _ => {
@@ -155,6 +160,7 @@ impl<'a> Parser<'a, '_> {
                     line_height,
                 },
                 lines,
+                switches,
             }),
         });
         Ok(())
@@ -185,6 +191,16 @@ impl<'a> Parser<'a, '_> {
             );
             return None;
         }
+        for &(k, at) in &def.switches {
+            if palette.color(k).is_none() {
+                self.errors.push(Error::at(
+                    at,
+                    ErrorCode::UnknownName,
+                    format!("Unknown text color `{k}` in palette `{}`", palette.name()),
+                ));
+                return None;
+            }
+        }
         let mut runs: Vec<(char, String)> = Vec::new();
         for (row, line) in def.lines.iter().enumerate() {
             if row > 0 {
@@ -192,20 +208,8 @@ impl<'a> Parser<'a, '_> {
                 runs.push((last, "\n".into()));
             }
             for &(c, pos, color) in line {
-                let run_key = match color {
-                    None => key,
-                    Some((k, at)) => {
-                        if palette.color(k).is_none() {
-                            self.errors.push(Error::at(
-                                at,
-                                ErrorCode::UnknownName,
-                                format!("Unknown text color `{k}` in palette `{}`", palette.name()),
-                            ));
-                            return None;
-                        }
-                        k
-                    }
-                };
+                // Every switched key was checked above.
+                let run_key = color.map_or(key, |(k, _)| k);
                 match runs.last_mut() {
                     Some((k, text)) if *k == run_key => text.push(c),
                     _ => runs.push((run_key, c.to_string())),

@@ -482,6 +482,14 @@ impl<'a> Parser<'a, '_> {
                     return None;
                 };
                 if depth + 1 > self.limits.max_nesting {
+                    // The tileset would fail quietly on the missing tile: report it.
+                    self.errors.push(token.error(
+                        ErrorCode::LimitExceeded,
+                        format!(
+                            "Sprites built from sprites more than the limit of {} deep",
+                            self.limits.max_nesting
+                        ),
+                    ));
                     return None;
                 }
                 (Some(built[j].clone()?), depth + 1)

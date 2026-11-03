@@ -175,9 +175,9 @@ font tiny height=5 baseline=4 line_height=7 spacing=1 space=2
   glyph g
     ...
     ###
+    #..
     #.#
     ###
-    ..#
   glyph e
     ...
     ###

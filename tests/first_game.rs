@@ -1035,3 +1035,75 @@ fn the_example_uses_every_feature() {
         doc.surface("rings").unwrap().key(94, 52)
     );
 }
+
+#[test]
+fn the_gallery_pictures_are_the_backgrounds_enlarged() {
+    let main = include_str!("../examples/first_game.spritebox");
+    let gallery = include_str!("../examples/first_game_gallery.spritebox");
+    let mut loader = |name: &str| match name {
+        "first_game.spritebox" => Ok(main.to_owned()),
+        _ => Err(spritebox::Error::new(ErrorCode::Io, name.to_owned())),
+    };
+    let doc = Document::parse_with_loader(gallery, &Limits::default(), &mut loader).unwrap();
+    let pictures = [
+        ("mockup", "first-game-mockup.png"),
+        ("layer_palettes", "layer-palettes.png"),
+        ("scale", "scale.png"),
+        ("strokes", "strokes.png"),
+        ("tile_sprites", "tile-sprites.png"),
+        ("text_colors", "text-colors.png"),
+    ];
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    for (background, file) in pictures {
+        let image = doc
+            .background(background)
+            .unwrap()
+            .render(&doc, &Default::default())
+            .unwrap()
+            .scaled_with(4, &Limits::default())
+            .unwrap();
+        let fixture = std::fs::read(root.join("tests/fixtures/gallery").join(file)).unwrap();
+        assert_eq!(
+            spritebox::png::decode(&fixture).unwrap(),
+            image,
+            "{file} changed; if on purpose, render the gallery with --background-scale 4 \
+             and copy it to tests/fixtures/gallery/ and docs/"
+        );
+        // The README's copy, which the published crate leaves out.
+        if let Ok(docs) = std::fs::read(root.join("docs").join(file)) {
+            assert_eq!(docs, fixture, "docs/{file} differs from its fixture");
+        }
+    }
+}
+
+#[test]
+fn review_regressions() {
+    // A switch that colors nothing is still checked.
+    for body in ["  A{z}{}A\n", "  A{z}\n", "  A{b}{z}\n"] {
+        let found = errors(&format!("{HUD}text t font=hud color=g\n{body}"));
+        assert_eq!(found.len(), 1, "{body}{found:?}");
+        assert_eq!(found[0].2, ErrorCode::UnknownName, "{body}");
+        assert!(found[0].3.contains("`z`"), "{}", found[0].3);
+    }
+    // Tiles nested beyond the limit are an error, not a silent loss.
+    let limits = Limits {
+        max_nesting: 3,
+        ..Limits::default()
+    };
+    let mut text =
+        String::from("palette p\n  k #000000\nsprite s 1x1\n  k\ntileset t 1x1\n  tile t0 = s\n");
+    for i in 1..6 {
+        text += &format!("  tile t{i} = t.t{}\n", i - 1);
+    }
+    text += "sprite last = t.t5\n";
+    let found = check(&text, &limits);
+    assert!(!found.is_empty(), "nested tiles passed check");
+    assert!(
+        found.iter().any(|e| e.code == ErrorCode::LimitExceeded),
+        "{found:?}"
+    );
+    assert!(
+        text.parse::<Document>().is_ok(),
+        "within the default limits"
+    );
+}

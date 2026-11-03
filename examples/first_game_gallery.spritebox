@@ -1,0 +1,77 @@
+; One panel per feature of 0.6, drawn from examples/first_game.spritebox. The README's
+; pictures of them are these backgrounds enlarged four times:
+;
+;   spritebox render examples/first_game_gallery.spritebox --out out/gallery --background-scale 4
+
+import first_game.spritebox
+
+; --- Layers with their own palettes: a stone, a glyph, and the runes made of them.
+
+surface back_palettes 76x20 palette=ui
+  rect back at=0,0 size=76x20 key=p
+
+background layer_palettes 76x20
+  layer back 76x20
+    place surface back_palettes at=0,0
+  layer art 76x20
+    place sprite rune_stone at=6,6
+    place sprite glyph at=22,6
+    place sprite frost_rune at=40,6
+    place sprite ember_rune at=56,6
+
+; --- scale(n): one icon at 1x, 2x and 3x.
+
+surface back_scale 72x36 palette=ui
+  rect back at=0,0 size=72x36 key=p
+
+background scale 72x36
+  layer back 72x36
+    place surface back_scale at=0,0
+  layer art 72x36
+    place sprite frost_rune at=6,30 anchor=bottom-left
+    place sprite frost_rune:scale(2) at=20,30 anchor=bottom-left
+    place sprite frost_rune:scale(3) at=42,30 anchor=bottom-left
+
+; --- Strokes: filled shapes, then their strokes, which keep what is inside them.
+
+surface strokes 96x40 palette=yard
+  rect ground at=0,0 size=96x40 key=m
+  rect filled at=4,4 size=20x14 key=s
+  rect thin at=28,4 size=20x14 key=s stroke=1
+  rect thick at=52,4 size=20x14 key=s stroke=2
+  ellipse disc at=4,22 size=20x14 key=b
+  ellipse ring at=28,22 size=20x14 key=b stroke=1
+  ellipse band at=52,22 size=20x14 key=b stroke=2
+  rect under at=76,4 size=16x32 key=g
+  ellipse over at=76,12 size=16x16 key=r stroke=1
+
+background strokes 96x40
+  layer art 96x40
+    place surface strokes at=0,0
+
+; --- Tiles as sprites: the tilemap's tombstone, alone in an inventory slot.
+
+surface shelf 32x40 palette=ui
+  rect back at=0,0 size=32x40 key=p
+
+surface slot 20x20 palette=ui
+  rect border at=0,0 size=20x20 key=e stroke=2
+
+background tile_sprites 96x40
+  layer yard 96x40
+    place tilemap yard_map at=0,0 crop=0,0,64,40
+  layer ui 96x40
+    place surface shelf at=64,0
+    place surface slot at=70,10
+    place sprite graveyard.tomb:scale(2) at=72,12
+
+; --- Several colors in one text.
+
+surface back_text 64x14 palette=ui
+  rect back at=0,0 size=64x14 key=p
+
+background text_colors 64x14
+  layer back 64x14
+    place surface back_text at=0,0
+  layer text 64x14
+    place sprite loot at=4,4
