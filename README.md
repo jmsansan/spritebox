@@ -353,6 +353,22 @@ sprite gem_glow = gem:pad(1):outline(y)
 Sprites may be derived from derived sprites, in any order in the file, but not in a
 circle.
 
+**Tiles as sprites.** A chain may also start from a tile of a tileset, written
+`TILESET.TILE`, wherever a chain starts: derived sprites, layers, animation frames,
+screens, tiles of other tilesets, and `place sprite` and scatter variants in
+backgrounds. The tile has the tileset's tile size and palette:
+
+```text
+sprite lone_tomb = graveyard.tomb2:flip_x
+background menu 480x270
+  layer props 480x270
+    place sprite graveyard.tomb2 at=40,200 anchor=bottom-left
+```
+
+A sprite whose name is the same dotted name wins. Only `tile` entries are sprites
+this way, not a terrain's pieces or variants. An unknown tileset or tile is an
+error that lists the tilesets, or the tileset's tiles.
+
 Shadows use ordinary palette colors, including alpha, and the same integer
 source-over as other layers. Long-shadow overlaps are drawn once, so translucent
 shadows do not get darker at overlapping steps. Rust has `Sprite::shadow` and

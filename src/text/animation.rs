@@ -182,17 +182,15 @@ impl<'a> Parser<'a, '_> {
                 let known = sprites.iter().any(|s| s.name == name)
                     || built.iter().any(|(s, _)| s.name == name);
                 if !known {
-                    let Some(base) = sprites.iter().find(|s| s.name == chain.base.text) else {
-                        if !self.sprites.iter().any(|d| d.name.text == chain.base.text) {
-                            self.errors.push(chain.base.error(
-                                ErrorCode::UnknownName,
-                                format!("Unknown sprite `{}`", chain.base.text),
-                            ));
+                    let Some(base) = self.chain_base(sprites, chain.base.text).cloned() else {
+                        if !self.defines_base(chain.base.text) {
+                            let error = self.unknown_base(chain.base);
+                            self.errors.push(error);
                         }
                         ok = false;
                         continue;
                     };
-                    match chain.apply(base, palettes, self.limits, &mut self.palette_uses) {
+                    match chain.apply(&base, palettes, self.limits, &mut self.palette_uses) {
                         Ok(mut sprite) => {
                             sprite.name = name.clone();
                             built.push((sprite, chain.base.pos));

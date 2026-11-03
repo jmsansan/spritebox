@@ -365,9 +365,17 @@ impl<'a> Parser<'a, '_> {
         palettes: &[Palette],
         fonts: &[crate::Font],
     ) -> Vec<(Sprite, Position)> {
+        self.record_tileset_tiles();
         let defs = std::mem::take(&mut self.sprites);
+        // After the sprites, the tiles that chains can start from as `TILESET.TILE`,
+        // unless a sprite has that name.
+        let tiles: Vec<_> = self
+            .chain_tiles()
+            .into_iter()
+            .filter(|t| !defs.iter().any(|d| d.name.text == t.name))
+            .collect();
         let mut index: HashMap<&str, usize> = HashMap::new();
-        let mut usable = vec![true; defs.len()];
+        let mut usable = vec![true; defs.len() + tiles.len()];
         for (i, def) in defs.iter().enumerate() {
             match index.get(def.name.text) {
                 Some(&first) => {
@@ -380,14 +388,32 @@ impl<'a> Parser<'a, '_> {
                 }
             }
         }
-        let mut state = vec![State::Unvisited; defs.len()];
-        let mut built: Vec<Option<Sprite>> = vec![None; defs.len()];
+        for (i, tile) in tiles.iter().enumerate() {
+            index.insert(&tile.name, defs.len() + i);
+        }
+        let name = |i: usize| match defs.get(i) {
+            Some(def) => def.name.text,
+            None => &tiles[i - defs.len()].name,
+        };
+        let mut state = vec![State::Unvisited; usable.len()];
+        let mut built: Vec<Option<Sprite>> = vec![None; usable.len()];
         for (root, _) in usable.iter().enumerate().filter(|(_, u)| **u) {
             let mut stack = vec![(root, false)];
             while let Some((i, expanded)) = stack.pop() {
                 if expanded {
-                    let depth =
-                        self.build_sprite(&defs[i], &index, &state, &mut built, palettes, fonts);
+                    let depth = match defs.get(i) {
+                        Some(def) => {
+                            self.build_sprite(def, &index, &state, &mut built, palettes, fonts)
+                        }
+                        None => self.build_tile_node(
+                            &tiles[i - defs.len()],
+                            i,
+                            &index,
+                            &state,
+                            &mut built,
+                            palettes,
+                        ),
+                    };
                     state[i] = State::Done(depth);
                     continue;
                 }
@@ -396,7 +422,14 @@ impl<'a> Parser<'a, '_> {
                 }
                 state[i] = State::InProgress;
                 stack.push((i, true));
-                for dependency in defs[i].dependencies() {
+                let dependencies = match defs.get(i) {
+                    Some(def) => def.dependencies(),
+                    None => self
+                        .chain_tile_base(&tiles[i - defs.len()])
+                        .into_iter()
+                        .collect(),
+                };
+                for dependency in dependencies {
                     let Some(&j) = index.get(dependency.text) else {
                         continue;
                     };
@@ -407,7 +440,8 @@ impl<'a> Parser<'a, '_> {
                                 ErrorCode::Cycle,
                                 format!(
                                     "Sprite `{}` is built from itself through `{}`",
-                                    defs[i].name.text, dependency.text
+                                    name(i),
+                                    dependency.text
                                 ),
                             ));
                             // Break the circle; sprites built from it fail quietly.
@@ -418,13 +452,43 @@ impl<'a> Parser<'a, '_> {
                 }
             }
         }
+        let mut built = built.into_iter();
         let resolved = defs
             .iter()
-            .zip(built)
+            .zip(built.by_ref())
             .filter_map(|(def, sprite)| sprite.map(|s| (s, def.name.pos)))
             .collect();
+        self.tile_sprites = built.flatten().collect();
         self.sprites = defs;
         resolved
+    }
+
+    /// Builds the tile node `i` for chains that start from `TILESET.TILE`, after the
+    /// sprite it is made from. Returns its depth, or `None` when it fails.
+    fn build_tile_node(
+        &mut self,
+        tile: &super::tiles::ChainTile,
+        i: usize,
+        index: &HashMap<&str, usize>,
+        state: &[State],
+        built: &mut [Option<Sprite>],
+        palettes: &[Palette],
+    ) -> Option<usize> {
+        let (base, depth) = match self.chain_tile_base(tile) {
+            None => (None, 0),
+            Some(token) => {
+                let &j = index.get(token.text)?;
+                let State::Done(Some(depth)) = state[j] else {
+                    return None;
+                };
+                if depth + 1 > self.limits.max_nesting {
+                    return None;
+                }
+                (Some(built[j].clone()?), depth + 1)
+            }
+        };
+        built[i] = Some(self.build_chain_tile(tile, base.as_ref(), palettes)?);
+        Some(depth)
     }
 
     /// Builds one sprite whose dependencies are done. Returns its depth, or `None`
@@ -441,10 +505,8 @@ impl<'a> Parser<'a, '_> {
         // The sprite a chain starts from, and the depth of the chain's result.
         let base = |this: &mut Self, chain: &Chain<'a>| -> Option<(Sprite, usize)> {
             let Some(&j) = index.get(chain.base.text) else {
-                this.errors.push(chain.base.error(
-                    ErrorCode::UnknownName,
-                    format!("Unknown sprite `{}`", chain.base.text),
-                ));
+                let error = this.unknown_base(chain.base);
+                this.errors.push(error);
                 return None;
             };
             let State::Done(Some(depth)) = state[j] else {

@@ -132,16 +132,19 @@ impl<'a> Parser<'a, '_> {
             *budget -= pixels;
             let mut items = Vec::new();
             for (chain, x, y) in &def.items {
-                let Some(base) = sprites.iter().find(|s| s.name == chain.base.text) else {
-                    self.errors.push(
+                let Some(base) = self.chain_base(sprites, chain.base.text).cloned() else {
+                    let error = if chain.base.text.contains('.') {
+                        self.unknown_base(chain.base)
+                    } else {
                         chain
                             .base
-                            .error(ErrorCode::UnknownName, "Unknown screen sprite"),
-                    );
+                            .error(ErrorCode::UnknownName, "Unknown screen sprite")
+                    };
+                    self.errors.push(error);
                     valid = false;
                     continue;
                 };
-                match chain.apply(base, palettes, self.limits, &mut self.palette_uses) {
+                match chain.apply(&base, palettes, self.limits, &mut self.palette_uses) {
                     Ok(sprite) => {
                         let pixels =
                             sprite.width as u64 * sprite.height as u64 * sprite.layers.len() as u64;

@@ -741,10 +741,14 @@ impl<'a> Parser<'a, '_> {
         let source = if let Some(s) = cache.get(&canonical) {
             s.clone()
         } else {
-            let base = doc.sprite(chain.base.text).ok_or_else(|| {
-                chain
-                    .base
-                    .error(ErrorCode::UnknownName, "Unknown background sprite")
+            let base = doc.chain_base(chain.base.text).ok_or_else(|| {
+                if chain.base.text.contains('.') {
+                    super::tiles::unknown_document_base(chain.base, doc)
+                } else {
+                    chain
+                        .base
+                        .error(ErrorCode::UnknownName, "Unknown background sprite")
+                }
             })?;
             let s =
                 chain.apply_scene(base, &doc.palettes, self.limits, &mut self.palette_uses, b)?;

@@ -363,3 +363,200 @@ fn stroke_errors_and_the_builder() {
     assert!(builder.stroke("l", &line, 'b', 1).is_err());
     assert!(builder.stroke("e", &ellipse, 'b', 0).is_err());
 }
+
+// --- Tiles wherever a chain starts (#60) ----------------------------------------
+
+const GRAVEYARD: &str = "\
+palette night
+  .  transparent
+  g  #808080
+  k  #000000
+  m  #304030
+sprite cross 4x4 palette=night
+  .g..
+  gggg
+  .g..
+  .g..
+tileset graveyard 4x4 palette=night
+  tile tomb1
+    .gg.
+    gggg
+    gkkg
+    gggg
+  tile tomb2 = cross:flip_x
+  terrain moss 16
+    island = cross
+    h_strip = cross
+    v_strip = cross
+    fill = cross
+";
+
+#[test]
+fn tiles_start_chains_in_sprites_layers_and_frames() {
+    let doc = parse(&format!(
+        "{GRAVEYARD}\
+sprite lone = graveyard.tomb2:flip_x
+sprite stack 4x4 palette=night
+  layer under = graveyard.tomb1
+  layer over = graveyard.tomb2:offset(1,0)
+animation blink loop
+  graveyard.tomb1 4
+  graveyard.tomb1:flip_x 4
+screen menu 8x4 palette=night
+  graveyard.tomb2 at 4,0
+"
+    ));
+    let tileset = doc.tileset("graveyard").unwrap();
+    let tomb1 = tileset.tile(tileset.index("tomb1").unwrap()).unwrap();
+    let tomb2 = tileset.tile(tileset.index("tomb2").unwrap()).unwrap();
+    // flip_x of a flip_x is the cross again.
+    assert_eq!(
+        doc.sprite("lone").unwrap().render(),
+        doc.sprite("cross").unwrap().render()
+    );
+    let stack = doc.sprite("stack").unwrap();
+    assert_eq!(stack.palette().name(), "night");
+    let image = stack.render();
+    assert_eq!(image.pixel(1, 2), tomb1.render().pixel(1, 2));
+    assert_eq!(image.pixel(3, 0), tomb2.render().pixel(2, 0));
+    let atlas = doc.export(&Default::default()).unwrap().atlas;
+    let frames: Vec<&str> = atlas.animations[0]
+        .frames
+        .iter()
+        .map(|f| f.sprite.as_str())
+        .collect();
+    assert_eq!(frames, ["graveyard.tomb1", "graveyard.tomb1"]);
+    assert!(atlas.animations[0].frames[1].flip_x);
+    assert!(atlas.region("graveyard.tomb1").is_some());
+    let screen = doc.screen("menu").unwrap();
+    assert_eq!(screen.pixel(5, 1), tomb2.render().pixel(1, 1));
+}
+
+#[test]
+fn tiles_are_placed_in_backgrounds() {
+    let doc = parse(&format!(
+        "{GRAVEYARD}\
+background yard 12x6
+  layer stones 12x6
+    place sprite graveyard.tomb2 at=1,1
+    place sprite graveyard.tomb1:flip_y at=6,1
+"
+    ));
+    let tileset = doc.tileset("graveyard").unwrap();
+    let tomb1 = tileset.tile(tileset.index("tomb1").unwrap()).unwrap().render();
+    let tomb2 = tileset.tile(tileset.index("tomb2").unwrap()).unwrap().render();
+    let flat = doc
+        .background("yard")
+        .unwrap()
+        .render(&doc, &BackgroundRenderOptions::default())
+        .unwrap();
+    for y in 0..4 {
+        for x in 0..4 {
+            assert_eq!(flat.pixel(x + 1, y + 1), tomb2.pixel(x, y));
+            assert_eq!(flat.pixel(x + 6, y + 1), tomb1.pixel(x, 3 - y));
+        }
+    }
+    let placed = &doc.background("yard").unwrap().layers()[0].placements()[0];
+    assert_eq!(
+        placed.source(),
+        &spritebox::SourceRef::Sprite("graveyard.tomb2".into())
+    );
+    // The typed builder takes the same reference.
+    let mut builder =
+        spritebox::Background::builder(&doc, "copy", (12, 6), 0, &Limits::default()).unwrap();
+    builder
+        .layer("stones", (12, 6), Default::default())
+        .unwrap()
+        .place(
+            spritebox::SourceRef::Sprite("graveyard.tomb2".into()),
+            spritebox::PlacementOptions {
+                at: (1, 1),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let copy = builder.finish().render(&doc, &Default::default()).unwrap();
+    assert_eq!(copy.pixel(2, 2), flat.pixel(2, 2));
+}
+
+#[test]
+fn unknown_tiles_name_what_exists() {
+    let cases = [
+        (
+            "sprite a = graveyard.tomb9\n",
+            "tileset `graveyard` has no tile `tomb9`; its tiles are `tomb1`, `tomb2`",
+        ),
+        (
+            "sprite a = graveyard.moss\n",
+            "tileset `graveyard` has no tile `moss`; its tiles are `tomb1`, `tomb2`",
+        ),
+        (
+            "sprite a = crypt.tomb1\n",
+            "no tileset `crypt`; the tilesets are `graveyard`",
+        ),
+        (
+            "animation a once\n  crypt.tomb1 2\n",
+            "no tileset `crypt`; the tilesets are `graveyard`",
+        ),
+        (
+            "screen s 8x8 palette=night\n  graveyard.nope at 0,0\n",
+            "tileset `graveyard` has no tile `nope`",
+        ),
+        (
+            "tileset other 4x4 palette=night\n  tile t = graveyard.nope\n",
+            "tileset `graveyard` has no tile `nope`",
+        ),
+        (
+            "background b 4x4\n  layer l 4x4\n    place sprite graveyard.nope at=0,0\n",
+            "tileset `graveyard` has no tile `nope`; its tiles are `tomb1`, `tomb2`",
+        ),
+    ];
+    for (body, expected) in cases {
+        let found = errors(&format!("{GRAVEYARD}{body}"));
+        assert_eq!(found.len(), 1, "{body}{found:?}");
+        assert_eq!(found[0].2, ErrorCode::UnknownName, "{body}");
+        assert!(found[0].3.contains(expected), "{body}{}", found[0].3);
+        assert!(found[0].0 >= 23, "{body}{found:?}");
+    }
+    let found = errors("palette p\n  k #000000\nsprite a = no.such\n");
+    assert!(
+        found[0].3.contains("no tileset `no`") && !found[0].3.contains("the tilesets are"),
+        "{}",
+        found[0].3
+    );
+}
+
+#[test]
+fn tile_references_follow_sprite_rules() {
+    // A tile made from another tileset's tile, in any order.
+    let doc = parse(&format!(
+        "tileset copies 4x4 palette=night\n  tile again = graveyard.tomb2:flip_x\n{GRAVEYARD}"
+    ));
+    let copies = doc.tileset("copies").unwrap();
+    assert_eq!(
+        copies.tile(1).unwrap().render(),
+        doc.sprite("cross").unwrap().render()
+    );
+    // A sprite of the same dotted name wins over the tile.
+    let doc = parse(&format!(
+        "{GRAVEYARD}sprite graveyard.tomb1 = cross:rot90\nsprite b = graveyard.tomb1\n"
+    ));
+    assert_eq!(
+        doc.sprite("b").unwrap().render(),
+        doc.sprite("cross").unwrap().rotate(1).render()
+    );
+    // A circle through a tile is an error.
+    let found = errors(&format!(
+        "{GRAVEYARD}tileset loop 4x4 palette=night\n  tile t = ring\nsprite ring = loop.t\n"
+    ));
+    assert!(
+        found.iter().any(|e| e.2 == ErrorCode::Cycle),
+        "{found:?}"
+    );
+    // A tile with errors reports them once, at the tile.
+    let found = errors(&format!(
+        "{GRAVEYARD}tileset bad 4x4 palette=night\n  tile t = missing\nsprite s = bad.t\n"
+    ));
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!((found[0].0, found[0].1), (24, 12));
+}

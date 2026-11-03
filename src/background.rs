@@ -314,6 +314,15 @@ impl Document {
     pub fn background(&self, name: &str) -> Option<&Background> {
         self.backgrounds.iter().find(|s| s.name() == name)
     }
+    /// The sprite that a modifier chain starts from: a sprite, or else a tileset's tile
+    /// written `TILESET.TILE`.
+    pub(crate) fn chain_base(&self, name: &str) -> Option<&Sprite> {
+        self.sprite(name).or_else(|| {
+            let (set, tile) = name.split_once('.')?;
+            let tileset = self.tileset(set)?;
+            tileset.tile(tileset.index(tile)?)
+        })
+    }
     pub(crate) fn scene_storage(&self) -> u64 {
         self.scene_storage_seen(&mut std::collections::HashSet::new())
     }
