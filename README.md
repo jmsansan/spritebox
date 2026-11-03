@@ -971,7 +971,8 @@ fn art(embedded: &std::collections::HashMap<&str, &str>) -> spritebox::Result<sp
 spritebox check <file> [--json]
 spritebox lint <file> [--strict] [--allow <code>]... [--deny <code>]... [--json]
 spritebox render <file> --out <dir> [--scale <n>] [--padding <n>] [--no-extrude]
-                 [--max-side <n>] [--lint] [--json]
+                 [--max-side <n>] [--lint] [--json] [--background <name>] [--camera <x,y>]
+                 [--background-mode <mode>] [--background-scale <n>]
 spritebox font <file> --out <font.ttf> [--font <name>] [--family <name>] [--json]
 ```
 
@@ -987,7 +988,12 @@ spritebox font <file> --out <font.ttf> [--font <name>] [--family <name>] [--json
   `preview.png` to `<dir>`. Nothing is written when the file
   has errors. `--scale` sets the preview's scale, and `--padding` and `--extrude`
   the atlas's. `--lint` marks lint's warnings on the preview's sprites, with a
-  legend (`PreviewOptions::lint` in the library).
+  legend (`PreviewOptions::lint` in the library). Background PNGs keep their
+  native size; `--background-scale <n>`, 2 to 8, also writes each of them, flat,
+  layer or themed, enlarged `n` times without filtering, as
+  `background-NNNN@<n>x.png` and `background-NNNN-layer-NNNN@<n>x.png`. The native
+  files and the metadata are unchanged, and each enlarged image is checked against
+  the image limits before anything is written.
 - `font` validates a file, then writes one of its fonts as TrueType: the only one,
   or the one `--font` names. `--family` sets the family name in the file.
 - `<file>` may be `-` for standard input.

@@ -291,7 +291,11 @@ spritebox render examples/backgrounds.spritebox --out out/camera --background ha
 Background selectors/camera/mode apply only to directory `render`, and reject
 duplicate flags or unknown names. `--max-side` remains the atlas/tileset limit;
 background PNGs use image limits and retain native dimensions regardless of
-sprite preview `--scale`. All outputs and the preview validate before first write.
+sprite preview `--scale`. `--background-scale N` (2..=8) also writes every exported
+background PNG enlarged N times by pixel replication, as `STEM@Nx.png` beside
+`STEM.png` (for example `background-0000@3x.png`); native files and metadata are
+byte-identical with and without it. All outputs and the preview validate before
+first write.
 
 Background thumbnails use divisor=max(1,ceil(W/320),ceil(H/180)), output
 ceil(W/divisor) by ceil(H/divisor), and nearest samples at coordinate*divisor.
