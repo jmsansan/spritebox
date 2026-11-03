@@ -45,9 +45,14 @@ pub(crate) fn scene_chain(
         },
         limits,
     )?;
-    let sprite = doc
-        .sprite(chain.base.text)
-        .ok_or_else(|| Error::new(ErrorCode::UnknownName, "Unknown background sprite"))?;
+    let sprite = doc.chain_base(chain.base.text).ok_or_else(|| {
+        if chain.base.text.contains('.') {
+            let e = tiles::unknown_document_base(chain.base, doc);
+            Error::new(e.code, e.message)
+        } else {
+            Error::new(ErrorCode::UnknownName, "Unknown background sprite")
+        }
+    })?;
     let sprite = chain.apply_scene(
         sprite,
         &doc.palettes,
@@ -131,6 +136,8 @@ pub(crate) fn parse(
         layer_counts: HashMap::new(),
         groups: Vec::new(),
         palette_uses: chain::PaletteUses::new(),
+        tile_sprites: Vec::new(),
+        tileset_tiles: Vec::new(),
         generated_names: &generated_names,
         widgets: Vec::new(),
         extra_definitions: 0,
@@ -271,6 +278,11 @@ struct Parser<'a, 'l> {
     groups: Vec<group::GroupDef<'a>>,
     /// Keys that chains used from palettes they swapped away from.
     palette_uses: chain::PaletteUses,
+    /// The tiles that chains can start from, named `TILESET.TILE`, once built.
+    tile_sprites: Vec<Sprite>,
+    /// Each tileset's name, the first of each name, with the names of the tiles that
+    /// chains can start from.
+    tileset_tiles: Vec<(String, Vec<String>)>,
 }
 
 /// The words of a definition's first line after its keyword and name: positional

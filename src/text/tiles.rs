@@ -63,7 +63,194 @@ enum Cell {
     Terrain(usize),
 }
 
+/// The diagnostic for a chain that starts from `name`, which names no sprite: for
+/// `TILESET.TILE`, it says which tilesets or tiles there are. `tilesets` lists each
+/// tileset with the tiles that chains can start from.
+pub(crate) fn unknown_base<'t>(
+    token: Token,
+    tilesets: impl Iterator<Item = (&'t str, Vec<&'t str>)>,
+) -> Error {
+    let Some((set, tile)) = token.text.split_once('.') else {
+        return token.error(
+            ErrorCode::UnknownName,
+            format!("Unknown sprite `{}`", token.text),
+        );
+    };
+    let quoted = |names: &[&str]| {
+        let mut list: Vec<String> = names.iter().take(8).map(|n| format!("`{n}`")).collect();
+        if names.len() > 8 {
+            list.push(format!("and {} more", names.len() - 8));
+        }
+        list.join(", ")
+    };
+    let tilesets: Vec<(&str, Vec<&str>)> = tilesets.collect();
+    let message = match tilesets.iter().find(|(name, _)| *name == set) {
+        Some((_, tiles)) if tiles.is_empty() => format!(
+            "Unknown sprite `{}`: tileset `{set}` has no tile `{tile}`, and no tiles that \
+             chains can start from",
+            token.text
+        ),
+        Some((_, tiles)) => format!(
+            "Unknown sprite `{}`: tileset `{set}` has no tile `{tile}`; its tiles are {}",
+            token.text,
+            quoted(tiles)
+        ),
+        None if tilesets.is_empty() => format!(
+            "Unknown sprite `{}`: there is no sprite of that name, and no tileset `{set}`",
+            token.text
+        ),
+        None => {
+            let names: Vec<&str> = tilesets.iter().map(|(n, _)| *n).collect();
+            format!(
+                "Unknown sprite `{}`: there is no sprite of that name, and no tileset \
+                 `{set}`; the tilesets are {}",
+                token.text,
+                quoted(&names)
+            )
+        }
+    };
+    token.error(ErrorCode::UnknownName, message)
+}
+
+/// [`unknown_base`] for the tilesets of a document.
+pub(crate) fn unknown_document_base(token: Token, doc: &crate::Document) -> Error {
+    unknown_base(
+        token,
+        doc.tilesets().iter().map(|t| {
+            let tiles = t
+                .tiles()
+                .iter()
+                .map(|s| s.name())
+                .filter(|n| !n.contains('/'))
+                .collect();
+            (t.name(), tiles)
+        }),
+    )
+}
+
+/// A tile that a chain can start from, as `TILESET.TILE`.
+pub(super) struct ChainTile {
+    pub name: String,
+    tileset: usize,
+    entry: usize,
+}
+
 impl<'a> Parser<'a, '_> {
+    /// The tiles of every tileset that chains can start from, as `TILESET.TILE`: the
+    /// first tileset of each name, its tiles but not its terrains.
+    pub(super) fn chain_tiles(&self) -> Vec<ChainTile> {
+        let mut seen = std::collections::HashSet::new();
+        let mut out = Vec::new();
+        for (t, def) in self.tilesets.iter().enumerate() {
+            if !seen.insert(def.name.text) {
+                continue;
+            }
+            for (e, entry) in def.entries.iter().enumerate() {
+                if let Entry::Tile { name, .. } = entry {
+                    out.push(ChainTile {
+                        name: format!("{}.{}", def.name.text, name.text),
+                        tileset: t,
+                        entry: e,
+                    });
+                }
+            }
+        }
+        out
+    }
+
+    /// The sprite that `tile`'s chain starts from, if it is made from one.
+    pub(super) fn chain_tile_base(&self, tile: &ChainTile) -> Option<Token<'a>> {
+        match &self.tilesets[tile.tileset].entries[tile.entry] {
+            Entry::Tile {
+                source: Source::Chain(chain),
+                ..
+            } => Some(chain.base),
+            _ => None,
+        }
+    }
+
+    /// Builds `tile` from `base`, the sprite its chain starts from, if any. Errors are
+    /// not reported here: the tileset reports them.
+    pub(super) fn build_chain_tile(
+        &mut self,
+        tile: &ChainTile,
+        base: Option<&Sprite>,
+        palettes: &[Palette],
+    ) -> Option<Sprite> {
+        let errors = std::mem::take(&mut self.errors);
+        let defs = std::mem::take(&mut self.tilesets);
+        let def = &defs[tile.tileset];
+        let built = match &def.entries[tile.entry] {
+            Entry::Tile { source, .. } => self
+                .sprite_palette(def.name, def.palette, palettes)
+                .cloned()
+                .and_then(|palette| {
+                    let sprites = base.map(std::slice::from_ref).unwrap_or_default();
+                    self.tile_sprite(tile.name.clone(), source, def, &palette, palettes, sprites)
+                }),
+            Entry::Terrain { .. } => None,
+        };
+        self.tilesets = defs;
+        self.errors = errors;
+        built
+    }
+
+    /// The sprite or `TILESET.TILE` that a chain starts from, among `sprites` and the
+    /// tiles built for chains.
+    pub(super) fn chain_base<'s>(
+        &'s self,
+        sprites: &'s [Sprite],
+        name: &str,
+    ) -> Option<&'s Sprite> {
+        sprites
+            .iter()
+            .chain(&self.tile_sprites)
+            .find(|s| s.name == name)
+    }
+
+    /// Records the tiles of each tileset, for [`Parser::defines_base`] and
+    /// [`Parser::unknown_base`].
+    pub(super) fn record_tileset_tiles(&mut self) {
+        let mut seen = std::collections::HashSet::new();
+        self.tileset_tiles = self
+            .tilesets
+            .iter()
+            .filter(|t| seen.insert(t.name.text))
+            .map(|t| {
+                let tiles = t
+                    .entries
+                    .iter()
+                    .filter_map(|e| match e {
+                        Entry::Tile { name, .. } => Some(name.text.to_owned()),
+                        Entry::Terrain { .. } => None,
+                    })
+                    .collect();
+                (t.name.text.to_owned(), tiles)
+            })
+            .collect();
+    }
+
+    /// Whether `name` names a sprite or a tile defined in the text, even one that
+    /// failed to build, whose errors were reported.
+    pub(super) fn defines_base(&self, name: &str) -> bool {
+        self.sprites.iter().any(|d| d.name.text == name)
+            || name.split_once('.').is_some_and(|(set, tile)| {
+                self.tileset_tiles
+                    .iter()
+                    .any(|(s, tiles)| s == set && tiles.iter().any(|t| t == tile))
+            })
+    }
+
+    /// [`unknown_base`] for the tilesets of the text.
+    pub(super) fn unknown_base(&self, token: Token) -> Error {
+        unknown_base(
+            token,
+            self.tileset_tiles
+                .iter()
+                .map(|(s, tiles)| (s.as_str(), tiles.iter().map(String::as_str).collect())),
+        )
+    }
+
     /// Each tileset's tiles, at their names, for lint.
     pub(super) fn tileset_sets(&self) -> Vec<SetDef<'a>> {
         self.tilesets
@@ -651,20 +838,20 @@ impl<'a> Parser<'a, '_> {
                         text: false,
                         name: None,
                         keys,
+                        palette: None,
                     }],
                     slice: None,
                 })
             }
             Source::Chain(chain) => {
-                let Some(base) = sprites.iter().find(|s| s.name == chain.base.text) else {
-                    if !self.sprites.iter().any(|d| d.name.text == chain.base.text) {
-                        self.errors.push(chain.base.error(
-                            ErrorCode::UnknownName,
-                            format!("Unknown sprite `{}`", chain.base.text),
-                        ));
+                let Some(base) = self.chain_base(sprites, chain.base.text).cloned() else {
+                    if !self.defines_base(chain.base.text) {
+                        let error = self.unknown_base(chain.base);
+                        self.errors.push(error);
                     }
                     return None;
                 };
+                let base = &base;
                 let mut sprite =
                     match chain.apply(base, palettes, self.limits, &mut self.palette_uses) {
                         Ok(s) => s,
@@ -688,17 +875,25 @@ impl<'a> Parser<'a, '_> {
                     ));
                     return None;
                 }
-                if sprite.palette.name != palette.name {
-                    self.errors.push(chain.base.error(
-                        ErrorCode::InvalidArgument,
+                if sprite.palette.name != palette.name || sprite.mixes_palettes() {
+                    let message = if sprite.mixes_palettes() {
+                        format!(
+                            "`{}` mixes palettes in its layers; the tiles of `{}` use only `{}`",
+                            chain.canonical(),
+                            def.name.text,
+                            palette.name
+                        )
+                    } else {
                         format!(
                             "`{}` uses palette `{}`; tileset `{}` uses `{}`",
                             chain.canonical(),
                             sprite.palette.name,
                             def.name.text,
                             palette.name
-                        ),
-                    ));
+                        )
+                    };
+                    self.errors
+                        .push(chain.base.error(ErrorCode::InvalidArgument, message));
                     return None;
                 }
                 sprite.name = name;

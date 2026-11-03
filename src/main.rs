@@ -44,6 +44,8 @@ Options:
   --background <n> Select one background; ordinary assets are still exported.
   --camera <x,y> Signed background camera pixels (default 0,0); directory render only.
   --background-mode <m> none|flat|layers|both (default both); directory render only.
+  --background-scale <n> Also write each background PNG enlarged n times, 2..=8,
+                as background-NNNN@<n>x.png; directory render only.
   --max-side <n> The largest side of a texture, 1..=8192 (default 2048).
   --font <name> The font to write, when the file has several.
   --family <n>  The family name in the TrueType file (default: the font's name).
@@ -63,6 +65,8 @@ const EXIT_IO: u8 = 3;
 
 struct Options {
     backgrounds: spritebox::BackgroundExportOptions,
+    /// Also write each background PNG enlarged this many times.
+    background_scale: Option<u32>,
     screen: Option<String>,
     theme: Option<String>,
     command: String,
@@ -105,6 +109,7 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
     let mut iter = args.iter();
     let mut screen = None;
     let mut backgrounds = spritebox::BackgroundExportOptions::default();
+    let mut background_scale = None;
     let mut background_flags = std::collections::HashSet::new();
     let mut theme = None;
     let mut scale_given = false;
@@ -126,13 +131,19 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
     let mut deny = Vec::new();
     while let Some(arg) = iter.next() {
         match arg.as_str() {
-            "--background" | "--camera" | "--background-mode" => {
+            "--background" | "--camera" | "--background-mode" | "--background-scale" => {
                 if !background_flags.insert(arg.clone()) {
                     return Err(format!("{arg} may appear only once"));
                 }
                 let value = iter.next().ok_or(format!("{arg} needs a value"))?;
                 match arg.as_str() {
                     "--background" => backgrounds.selection = Some(value.clone()),
+                    "--background-scale" => {
+                        background_scale =
+                            Some(value.parse().ok().filter(|n| (2..=8).contains(n)).ok_or(
+                                format!("--background-scale must be 2..=8, not `{value}`"),
+                            )?);
+                    }
                     "--camera" => {
                         let (x, y) = value.split_once(',').ok_or("--camera needs signed X,Y")?;
                         backgrounds.camera = (
@@ -253,6 +264,7 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
     }
     Ok(Options {
         backgrounds,
+        background_scale,
         screen,
         theme,
         command,
@@ -465,7 +477,9 @@ fn render(
         },
         &preview_limits,
     )?;
+    let enlarged = enlarged_backgrounds(&export, options.background_scale, limits)?;
     let mut planned = export.file_names();
+    planned.extend(enlarged.iter().map(|(name, _)| name.clone()));
     planned.push("preview.png".into());
     let mut names = std::collections::HashSet::new();
     if planned.len() > limits.max_export_files {
@@ -483,6 +497,7 @@ fn render(
         }
     }
     let mut files = export.files();
+    files.extend(enlarged);
     files.push(("preview.png".into(), png::encode(&preview)));
     let io = |path: &Path, e: std::io::Error| {
         Error::new(
@@ -498,6 +513,42 @@ fn render(
         written.push(path);
     }
     Ok(written)
+}
+
+/// Each exported background PNG, flat or layer, base or themed, enlarged `scale`
+/// times without filtering, as `NAME@<scale>x.png`. Each enlarged image is checked
+/// against the image limits before it is made.
+fn enlarged_backgrounds(
+    export: &spritebox::Export,
+    scale: Option<u32>,
+    limits: &Limits,
+) -> Result<Vec<(String, Vec<u8>)>, Error> {
+    let Some(scale) = scale else {
+        return Ok(Vec::new());
+    };
+    let mut files = Vec::new();
+    let backgrounds = export
+        .backgrounds
+        .iter()
+        .chain(export.themes.iter().flat_map(|t| &t.backgrounds));
+    for background in backgrounds {
+        let images = background
+            .flat
+            .iter()
+            .map(|f| (&f.file, &f.image))
+            .chain(background.layers.iter().map(|l| (&l.file, &l.image)));
+        for (file, image) in images {
+            let stem = file.strip_suffix(".png").unwrap_or(file);
+            let enlarged = image.scaled_with(scale, limits).map_err(|e| {
+                Error::new(
+                    e.code,
+                    format!("{file} enlarged {scale} times: {}", e.message),
+                )
+            })?;
+            files.push((format!("{stem}@{scale}x.png"), png::encode(&enlarged)));
+        }
+    }
+    Ok(files)
 }
 
 /// The directory that imports resolve from: the file's, or the current one for

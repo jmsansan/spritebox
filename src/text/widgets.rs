@@ -228,7 +228,11 @@ impl<'a> Parser<'a, '_> {
                                         .any(|&(dx, dy)| !opaque(x as i64 + dx, y as i64 + dy))
                                 {
                                     boundary = true;
-                                    if sprite.key(x, y) != Some(key) {
+                                    // The outline is the key of the icon's own palette.
+                                    let own = sprite
+                                        .top_layer(x, y)
+                                        .is_some_and(|i| sprite.layers[i].palette.is_none());
+                                    if sprite.key(x, y) != Some(key) || !own {
                                         valid = false;
                                         self.errors.push(member.error(
                                             ErrorCode::InvalidArgument,

@@ -616,3 +616,117 @@ fn ui_themes_and_screen_rendering() {
     assert_eq!(output.status.code(), Some(2));
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn background_scale_writes_enlarged_copies_and_keeps_native_files() {
+    let dir = temp_dir("background-scale");
+    let input = write(
+        &dir,
+        "scene.spritebox",
+        include_str!("fixtures/backgrounds/scene.spritebox"),
+    );
+    let render = |name: &str, extra: &[&str]| {
+        let out = dir.join(name);
+        let mut args = vec!["render", &input, "--out", out.to_str().unwrap()];
+        args.extend(["--theme", "all", "--camera", "2,0"]);
+        args.extend(extra);
+        let rendered = spritebox(&args);
+        assert_eq!(rendered.status.code(), Some(0), "{}", stderr(&rendered));
+        out
+    };
+    let native = render("native", &[]);
+    let scaled = render("scaled", &["--background-scale", "3"]);
+    let natives: Vec<String> = std::fs::read_dir(&native)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().into_string().unwrap())
+        .collect();
+    let mut enlarged = 0;
+    for name in &natives {
+        // Native files, and the metadata, are byte-identical with and without the flag.
+        assert_eq!(
+            std::fs::read(native.join(name)).unwrap(),
+            std::fs::read(scaled.join(name)).unwrap(),
+            "{name}"
+        );
+        let Some(stem) = name
+            .strip_suffix(".png")
+            .filter(|s| s.starts_with("background-"))
+        else {
+            continue;
+        };
+        let small = spritebox::png::decode(&std::fs::read(native.join(name)).unwrap()).unwrap();
+        let big_name = format!("{stem}@3x.png");
+        let big = spritebox::png::decode(&std::fs::read(scaled.join(&big_name)).unwrap())
+            .unwrap_or_else(|e| panic!("{big_name}: {e}"));
+        assert_eq!(
+            (big.width(), big.height()),
+            (small.width() * 3, small.height() * 3)
+        );
+        // Every enlarged block equals its native pixel.
+        for y in 0..big.height() {
+            for x in 0..big.width() {
+                assert_eq!(
+                    big.pixel(x, y),
+                    small.pixel(x / 3, y / 3),
+                    "{big_name} {x},{y}"
+                );
+            }
+        }
+        enlarged += 1;
+    }
+    // A flat image and two layers, for the base colors and one theme.
+    assert_eq!(enlarged, 6, "{natives:?}");
+    let count = std::fs::read_dir(&scaled).unwrap().count();
+    assert_eq!(count, natives.len() + enlarged);
+    let json = std::fs::read_to_string(scaled.join("spritebox.json")).unwrap();
+    assert!(!json.contains("@3x"), "{json}");
+
+    let bad = dir.join("not-created");
+    for arguments in [
+        vec!["--background-scale", "1"],
+        vec!["--background-scale", "9"],
+        vec!["--background-scale", "x"],
+        vec!["--background-scale", "2", "--background-scale", "2"],
+    ] {
+        let mut args = vec!["render", &input, "--out", bad.to_str().unwrap()];
+        args.extend(arguments.iter().copied());
+        let failed = spritebox(&args);
+        assert_eq!(failed.status.code(), Some(2), "{arguments:?}");
+        assert!(!bad.exists());
+    }
+    let screen_out = dir.join("hud.png");
+    let screen = spritebox(&[
+        "render",
+        &input,
+        "--screen",
+        "hud",
+        "--out",
+        screen_out.to_str().unwrap(),
+        "--background-scale",
+        "2",
+    ]);
+    assert_eq!(screen.status.code(), Some(2));
+    // Image limits are checked before anything is written.
+    let huge = write(
+        &dir,
+        "huge.spritebox",
+        "palette p\n  a #000000\nsurface s 4000x8\n  rect r at=0,0 size=4000x8 key=a\n\
+         background b 4000x8\n  layer l 4000x8\n    place surface s at=0,0\n",
+    );
+    let huge_out = dir.join("huge");
+    let failed = spritebox(&[
+        "render",
+        &huge,
+        "--out",
+        huge_out.to_str().unwrap(),
+        "--background-scale",
+        "3",
+    ]);
+    assert_eq!(failed.status.code(), Some(1), "{}", stderr(&failed));
+    assert!(
+        stderr(&failed).contains("enlarged 3 times"),
+        "{}",
+        stderr(&failed)
+    );
+    assert!(!huge_out.exists());
+}

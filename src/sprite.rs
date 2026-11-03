@@ -73,6 +73,21 @@ pub(crate) struct Layer {
     pub text: bool,
     pub name: Option<String>,
     pub keys: Vec<char>,
+    /// The palette that colors this layer's keys, when it is not the sprite's: a
+    /// layer made from a sprite in another palette keeps that palette.
+    pub palette: Option<Palette>,
+}
+
+impl Layer {
+    /// A layer colored by its sprite's palette.
+    pub(crate) fn new(name: Option<String>, keys: Vec<char>) -> Layer {
+        Layer {
+            text: false,
+            name,
+            keys,
+            palette: None,
+        }
+    }
 }
 
 /// A sprite: a grid of palette keys in one or more layers, and the palette that
@@ -106,9 +121,30 @@ impl Sprite {
     pub fn height(&self) -> u32 {
         self.height
     }
-    /// The palette that colors the sprite's keys.
+    /// The sprite's own palette, which colors its keys. A layer made from a sprite
+    /// in another palette keeps that palette; see [`Sprite::layer_palettes`].
     pub fn palette(&self) -> &Palette {
         &self.palette
+    }
+    /// The palette that colors each layer, bottom first.
+    pub fn layer_palettes(&self) -> impl Iterator<Item = &Palette> {
+        self.layers
+            .iter()
+            .map(|l| l.palette.as_ref().unwrap_or(&self.palette))
+    }
+    /// Whether some layer is colored by a palette other than [`Sprite::palette`].
+    pub fn mixes_palettes(&self) -> bool {
+        self.layers.iter().any(|l| l.palette.is_some())
+    }
+    /// The palette that colors layer `index`.
+    pub(crate) fn layer_palette(&self, index: usize) -> &Palette {
+        self.layers[index].palette.as_ref().unwrap_or(&self.palette)
+    }
+    /// A color lookup for each layer.
+    pub(crate) fn lookups(&self) -> Vec<ColorLookup<'_>> {
+        (0..self.layers.len())
+            .map(|i| ColorLookup::new(self.layer_palette(i)))
+            .collect()
     }
     /// The names of the layers, bottom first; `None` for a sprite written without
     /// layers.
@@ -123,13 +159,18 @@ impl Sprite {
         Some(self.layers[layer].keys[y as usize * self.width as usize + x as usize])
     }
 
-    /// The keys that the layers use, each once, in order.
-    pub(crate) fn keys(&self) -> Vec<char> {
-        let mut keys: Vec<char> = self
-            .layers
-            .iter()
-            .flat_map(|l| l.keys.iter().copied())
-            .filter(|&k| k != EMPTY)
+    /// The keys that the layers use, each once with the palette that colors it, in
+    /// order.
+    pub(crate) fn palette_keys(&self) -> Vec<(&str, char)> {
+        let mut keys: Vec<(&str, char)> = (0..self.layers.len())
+            .flat_map(|i| {
+                let palette = self.layer_palette(i).name.as_str();
+                self.layers[i]
+                    .keys
+                    .iter()
+                    .filter(|&&k| k != EMPTY)
+                    .map(move |&k| (palette, k))
+            })
             .collect();
         keys.sort_unstable();
         keys.dedup();
@@ -142,7 +183,6 @@ impl Sprite {
             return None;
         }
         let i = y as usize * self.width as usize + x as usize;
-        let lookup = ColorLookup::new(&self.palette);
         let mut covering = self
             .layers
             .iter()
@@ -152,19 +192,23 @@ impl Sprite {
         let (top, _) = covering.clone().next()?;
         Some(
             covering
-                .find(|(_, layer)| lookup.get(layer.keys[i]).a > 0)
+                .find(|(n, layer)| {
+                    self.layer_palette(*n)
+                        .color(layer.keys[i])
+                        .is_some_and(|c| c.a > 0)
+                })
                 .map_or(top, |(n, _)| n),
         )
     }
 
-    /// Renders the sprite to RGBA8: each layer's keys are colored by the palette and
+    /// Renders the sprite to RGBA8: each layer's keys are colored by its palette and
     /// the layers are drawn over each other in order with [`Color::over`]. Pixels that
     /// no layer covers are transparent.
     pub fn render(&self) -> Image {
-        let lookup = ColorLookup::new(&self.palette);
+        let lookups = self.lookups();
         let mut image = Image::blank(self.width, self.height);
         let w = self.width as usize;
-        for layer in &self.layers {
+        for (layer, lookup) in self.layers.iter().zip(&lookups) {
             for (i, &key) in layer.keys.iter().enumerate() {
                 if key == EMPTY {
                     continue;
@@ -205,6 +249,7 @@ impl Sprite {
                     text: layer.text,
                     name: layer.name.clone(),
                     keys,
+                    palette: layer.palette.clone(),
                 }
             })
             .collect();
@@ -311,8 +356,29 @@ impl Sprite {
     }
 
     /// The same keys colored by `palette` (`:swap(palette)`), which must have every
-    /// key that the sprite uses.
+    /// key that the sprite uses. A sprite whose layers use more than one palette
+    /// cannot be swapped.
     pub fn with_palette(&self, palette: &Palette) -> Result<Sprite> {
+        if self.mixes_palettes() {
+            let layers: Vec<String> = self
+                .layers
+                .iter()
+                .enumerate()
+                .map(|(i, l)| {
+                    format!(
+                        "`{}` uses `{}`",
+                        l.name.as_deref().unwrap_or("(unnamed)"),
+                        self.layer_palette(i).name
+                    )
+                })
+                .collect();
+            return Err(Error::invalid(format!(
+                "Sprite `{}` mixes palettes, so it cannot be swapped to `{}`: layer {}",
+                self.name,
+                palette.name,
+                layers.join(", layer ")
+            )));
+        }
         if let Some(missing) = self.missing_key(palette) {
             return Err(Error::new(
                 ErrorCode::UnknownName,
@@ -379,14 +445,9 @@ impl Sprite {
         }
         let mut sprite = self.clone();
         sprite.name = format!("{}:outline({key})", self.name);
-        sprite.layers.insert(
-            0,
-            Layer {
-                text: false,
-                name: Some("outline".into()),
-                keys,
-            },
-        );
+        sprite
+            .layers
+            .insert(0, Layer::new(Some("outline".into()), keys));
         Ok(sprite)
     }
 }
@@ -439,11 +500,10 @@ mod tests {
             width: rows[0].len() as u32,
             height: rows.len() as u32,
             palette,
-            layers: vec![Layer {
-                text: false,
-                name: None,
-                keys: rows.iter().flat_map(|r| r.chars()).collect(),
-            }],
+            layers: vec![Layer::new(
+                None,
+                rows.iter().flat_map(|r| r.chars()).collect(),
+            )],
             slice: None,
         }
     }

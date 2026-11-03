@@ -1,0 +1,202 @@
+; Concept art for a small graveyard tower defense, with the features that the first
+; game drawn with spritebox asked for: runes whose stone and glyph use different
+; palettes, icons enlarged with scale(n), stroked range rings, a board placed inside
+; the interface mockup, tombstone tiles used as sprites, and a loot text in several
+; colors. Render it with:
+;
+;   spritebox render examples/first_game.spritebox --out out/first_game --background-scale 3
+
+palette stone
+  .  transparent
+  k  #14101c
+  d  #3c3848
+  s  #6c6878
+  l  #a8a4b4
+
+palette frost
+  .  transparent
+  f  #3ca0e8
+  w  #d8f0ff
+
+palette ember
+  .  transparent
+  f  #e85c28
+  w  #ffd890
+
+palette yard
+  k  #14101c
+  m  #2c4434
+  g  #4c6c48
+  d  #3c3848
+  s  #6c6878
+  r  #c8b858
+  b  #3ca0e8
+
+palette ui
+  p  #282438
+  e  #48445c
+  t  #a8a4b4
+  b  #3ca0e8
+
+; --- Runes: a stone in the colors of its rank, a glyph in its element's. ------
+
+sprite rune_stone 8x8 palette=stone
+  ..kkkk..
+  .kllssk.
+  kllsssdk
+  klssssdk
+  ksssssdk
+  kssssddk
+  .kddddk.
+  ..kkkk..
+
+sprite glyph 8x8 palette=frost
+  ........
+  ........
+  ...ww...
+  ..wffw..
+  ...ff...
+  ...ff...
+  ........
+  ........
+
+sprite frost_rune 8x8 palette=stone
+  layer stone = rune_stone
+  layer glyph = glyph
+
+sprite ember_rune 8x8 palette=stone
+  layer stone = rune_stone
+  layer glyph = glyph:swap(ember)
+
+; The same icon at 1x on the board and 3x in tooltips.
+sprite frost_rune_large = frost_rune:scale(3)
+
+; --- Tombstone tiles, also used as sprites. --------------------------------------
+
+tileset graveyard 8x8 palette=yard
+  tile grass
+    mmmmmmmm
+    mgmmmmgm
+    mmmmmmmm
+    mmmgmmmm
+    mmmmmmmm
+    mgmmmmmm
+    mmmmmgmm
+    mmmmmmmm
+  tile tomb
+    mmddddmm
+    mdssssdm
+    mdsddsdm
+    mdssssdm
+    mdssssdm
+    mdssssdm
+    kkkkkkkk
+    mmmmmmmm
+
+tilemap yard_map tileset=graveyard
+  legend
+    . grass
+    t tomb
+  map
+    ................
+    ..t.........t...
+    ................
+    ......t.........
+    ................
+    ..........t.....
+    .t..............
+    ................
+    ....t.......t...
+    ................
+    ................
+    ........t.......
+
+; --- The board: ground, tombs, a bell's spreading pulse and a range ring. ------
+
+surface rings 128x96 palette=yard
+  ellipse pulse_outer at=24,20 size=40x40 key=r stroke=1
+  ellipse pulse_inner at=32,28 size=24x24 key=r stroke=1
+  ellipse range at=70,34 size=48x36 key=b stroke=2
+  rect frame at=0,0 size=128x96 key=k stroke=1
+
+background board 128x96 seed=3
+  layer ground 128x96
+    place tilemap yard_map at=0,0
+  layer marks 128x96
+    place surface rings at=0,0
+    place sprite graveyard.tomb:flip_x at=90,52 anchor=bottom-left
+    place sprite frost_rune at=40,40 anchor=center
+
+; --- The interface: the board, a tooltip with the large rune and its loot. ------
+
+font tiny height=5 baseline=4 line_height=7 spacing=1 space=2
+  glyph +
+    .....
+    ..#..
+    .###.
+    ..#..
+    .....
+  glyph 1
+    .#.
+    ##.
+    .#.
+    .#.
+    ###
+  glyph 2
+    ##.
+    ..#
+    .#.
+    #..
+    ###
+  glyph %
+    #..#
+    ..#.
+    .#..
+    #..#
+    ....
+  glyph d
+    ..#
+    ..#
+    ###
+    #.#
+    ###
+  glyph a
+    ...
+    ##.
+    ..#
+    ###
+    ###
+  glyph m
+    .....
+    .....
+    ####.
+    #.#.#
+    #.#.#
+  glyph g
+    ...
+    ###
+    #..
+    #.#
+    ###
+  glyph e
+    ...
+    ###
+    ###
+    #..
+    ###
+
+text loot font=tiny palette=ui color=t
+  {b}+12 %{} damage
+
+surface tooltip 64x40 palette=ui
+  rect back at=0,0 size=64x40 key=p
+  rect border at=0,0 size=64x40 key=e stroke=1
+
+background mockup 200x96 seed=3
+  layer board 200x96
+    place background board at=0,0
+  layer hud 200x96
+    place surface tooltip at=132,4
+    place sprite frost_rune_large at=136,8
+    place sprite loot at=136,34
+    place sprite ember_rune at=136,80

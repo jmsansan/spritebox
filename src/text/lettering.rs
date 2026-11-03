@@ -8,8 +8,15 @@ pub(super) struct TextDef<'a> {
     pub palette: Option<Token<'a>>,
     pub color: Token<'a>,
     pub options: TextOptions,
-    pub lines: Vec<Vec<(char, Position)>>,
+    pub lines: Vec<Vec<Lettered>>,
+    /// Every `{KEY}`, with where its key is written, including those that color no
+    /// character.
+    pub switches: Vec<(char, Position)>,
 }
+
+/// A character of a text, where it is written, and the key that `{KEY}` switched to
+/// before it, with where the key is written; `None` for `color=`.
+pub(super) type Lettered = (char, Position, Option<(char, Position)>);
 
 impl<'a> Parser<'a, '_> {
     pub(super) fn text_sprite(&mut self, node: &Node<'a>) -> Parsed<()> {
@@ -66,10 +73,16 @@ impl<'a> Parser<'a, '_> {
             .min()
             .ok_or_else(|| name.error(ErrorCode::Syntax, "Text needs an indented line"))?;
         let mut lines = Vec::new();
+        // The color that `{KEY}` switched to, which lasts across lines until `{}`.
+        let mut switched: Option<(char, Position)> = None;
+        let mut switches = Vec::new();
         for child in &node.children {
             let raw = child.line.raw.get(indent..).unwrap_or("").trim_end();
             let mut line = Vec::new();
             let mut offset = 0;
+            let at = |column: usize| {
+                Position::in_file(name.pos.file, child.line.first().pos.line, column)
+            };
             for word in raw.split_inclusive(' ') {
                 let token = word.trim_end_matches(' ');
                 let escaped = token.strip_prefix("U+").filter(|hex| {
@@ -90,34 +103,44 @@ impl<'a> Parser<'a, '_> {
                                 "Invalid text character",
                             )
                         })?;
-                    line.push((
-                        c,
-                        Position::in_file(
-                            name.pos.file,
-                            child.line.first().pos.line,
-                            indent + offset + 1,
-                        ),
-                    ));
+                    line.push((c, at(indent + offset + 1), switched));
                     for (i, _) in word[token.len()..].chars().enumerate() {
                         line.push((
                             ' ',
-                            Position::in_file(
-                                name.pos.file,
-                                child.line.first().pos.line,
-                                indent + offset + token.chars().count() + i + 1,
-                            ),
+                            at(indent + offset + token.chars().count() + i + 1),
+                            switched,
                         ));
                     }
                 } else {
-                    for (i, c) in word.chars().enumerate() {
-                        line.push((
-                            c,
-                            Position::in_file(
-                                name.pos.file,
-                                child.line.first().pos.line,
-                                indent + offset + i + 1,
-                            ),
-                        ));
+                    let chars: Vec<char> = word.chars().collect();
+                    let mut i = 0;
+                    while i < chars.len() {
+                        let column = indent + offset + i + 1;
+                        if chars[i] != '{' {
+                            line.push((chars[i], at(column), switched));
+                            i += 1;
+                            continue;
+                        }
+                        // `{}` returns to `color=`; `{KEY}` switches to KEY.
+                        match (chars.get(i + 1), chars.get(i + 2)) {
+                            (Some('}'), _) => {
+                                switched = None;
+                                i += 2;
+                            }
+                            (Some(&key), Some('}')) if key != ' ' && key != '{' => {
+                                switched = Some((key, at(column + 1)));
+                                switches.push((key, at(column + 1)));
+                                i += 3;
+                            }
+                            _ => {
+                                return Err(Error::at(
+                                    at(column),
+                                    ErrorCode::Syntax,
+                                    "Expected `{KEY}` to change the color or `{}` to return \
+                                     to color=; write U+007B for a literal `{`",
+                                ));
+                            }
+                        }
                     }
                 }
                 offset += word.chars().count();
@@ -137,6 +160,7 @@ impl<'a> Parser<'a, '_> {
                     line_height,
                 },
                 lines,
+                switches,
             }),
         });
         Ok(())
@@ -167,8 +191,29 @@ impl<'a> Parser<'a, '_> {
             );
             return None;
         }
-        for line in &def.lines {
-            for &(c, pos) in line {
+        for &(k, at) in &def.switches {
+            if palette.color(k).is_none() {
+                self.errors.push(Error::at(
+                    at,
+                    ErrorCode::UnknownName,
+                    format!("Unknown text color `{k}` in palette `{}`", palette.name()),
+                ));
+                return None;
+            }
+        }
+        let mut runs: Vec<(char, String)> = Vec::new();
+        for (row, line) in def.lines.iter().enumerate() {
+            if row > 0 {
+                let last = runs.last().map_or(key, |r| r.0);
+                runs.push((last, "\n".into()));
+            }
+            for &(c, pos, color) in line {
+                // Every switched key was checked above.
+                let run_key = color.map_or(key, |(k, _)| k);
+                match runs.last_mut() {
+                    Some((k, text)) if *k == run_key => text.push(c),
+                    _ => runs.push((run_key, c.to_string())),
+                }
                 if font.glyph(c).is_none() {
                     self.errors.push(Error::at(
                         pos,
@@ -179,13 +224,8 @@ impl<'a> Parser<'a, '_> {
                 }
             }
         }
-        let text = def
-            .lines
-            .iter()
-            .map(|l| l.iter().map(|(c, _)| c).collect::<String>())
-            .collect::<Vec<_>>()
-            .join("\n");
-        match font.sprite_with(&text, palette, key, &def.options, self.limits) {
+        let runs: Vec<(char, &str)> = runs.iter().map(|(k, t)| (*k, t.as_str())).collect();
+        match font.sprite_runs_with(&runs, palette, &def.options, self.limits) {
             Ok(mut sprite) => {
                 sprite.name = name.text.to_owned();
                 Some((sprite, 0))

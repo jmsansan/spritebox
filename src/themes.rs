@@ -73,6 +73,13 @@ impl Document {
             if let Some(p) = palettes.iter().find(|p| p.name == sprite.palette.name) {
                 sprite.palette = p.clone();
             }
+            for layer in &mut sprite.layers {
+                if let Some(own) = &mut layer.palette {
+                    if let Some(p) = palettes.iter().find(|p| p.name == own.name) {
+                        *own = p.clone();
+                    }
+                }
+            }
         };
         for sprite in self.sprites.iter_mut().chain(self.frame_sprites.iter_mut()) {
             apply(sprite);
@@ -152,6 +159,9 @@ pub(crate) fn palette_signature(sprite: &Sprite) -> Vec<u8> {
     key.extend_from_slice(&(sprite.palette.name.len() as u64).to_le_bytes());
     key.extend_from_slice(sprite.palette.name.as_bytes());
     for layer in &sprite.layers {
+        let palette = layer.palette.as_ref().map_or("", |p| p.name.as_str());
+        key.extend_from_slice(&(palette.len() as u64).to_le_bytes());
+        key.extend_from_slice(palette.as_bytes());
         key.extend_from_slice(&(layer.keys.len() as u64).to_le_bytes());
         for &c in &layer.keys {
             key.extend_from_slice(&(c as u32).to_le_bytes());

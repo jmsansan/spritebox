@@ -7,7 +7,8 @@ use crate::{Error, ErrorCode, Fill, Limits, Palette, Shadow, Sprite};
 
 /// The modifiers, for error messages.
 pub(crate) const MODIFIERS: &str = "`flip_x`, `flip_y`, `rot90`, `rot180`, `rot270`, \
-    `offset(dx,dy)`, `pad(n)`, `swap(palette)`, `outline(key)`, `size(WxH)` or `shadow(key,dx,dy)`";
+    `offset(dx,dy)`, `pad(n)`, `scale(n)`, `swap(palette)`, `outline(key)`, `size(WxH)` or \
+    `shadow(key,dx,dy)`";
 
 #[derive(Clone, Debug)]
 pub(crate) enum Op<'a> {
@@ -17,6 +18,8 @@ pub(crate) enum Op<'a> {
     Rotate(u32),
     Offset(i32, i32),
     Pad(u32),
+    /// Each pixel enlarged to an n × n block, 2 to 8.
+    Scale(u32),
     Swap(Token<'a>),
     Outline(char),
     Size(u32, u32, Fill),
@@ -67,6 +70,10 @@ impl<'a> Chain<'a> {
                 Op::Size(a, b, _) => {
                     w = *a;
                     h = *b;
+                }
+                Op::Scale(n) => {
+                    (w, h) = crate::effects::scaled_size(w, h, *n)
+                        .map_err(|e| self.base.error(e.code, e.message))?;
                 }
                 Op::Outline(_) => {
                     layers = layers.checked_add(1).ok_or_else(|| {
@@ -127,6 +134,7 @@ impl<'a> Chain<'a> {
                 Op::Rotate(q) => name.push_str(&format!("rot{}", q * 90)),
                 Op::Offset(dx, dy) => name.push_str(&format!("offset({dx},{dy})")),
                 Op::Pad(n) => name.push_str(&format!("pad({n})")),
+                Op::Scale(n) => name.push_str(&format!("scale({n})")),
                 Op::Swap(p) => name.push_str(&format!("swap({})", p.text)),
                 Op::Outline(k) => name.push_str(&format!("outline({k})")),
                 Op::Size(w, h, fill) => name.push_str(&format!(
@@ -197,6 +205,10 @@ impl<'a> Chain<'a> {
                     w = *width;
                     h = *height;
                 }
+                Op::Scale(n) => {
+                    (w, h) = crate::effects::scaled_size(w, h, *n)
+                        .map_err(|e| token.error(e.code, e.message))?;
+                }
                 Op::Shadow(_, x, y, _) => {
                     w = w.checked_add(x.unsigned_abs()).ok_or_else(|| {
                         token.error(ErrorCode::LimitExceeded, "Shadow width overflow")
@@ -211,8 +223,8 @@ impl<'a> Chain<'a> {
             sprite
                 .effect_size(w, h, layers, limits)
                 .map_err(|e| token.error(e.code, e.message))?;
-            for key in sprite.keys() {
-                uses.insert((sprite.palette.name.clone(), key));
+            for (palette, key) in sprite.palette_keys() {
+                uses.insert((palette.to_owned(), key));
             }
             sprite = match op {
                 Op::FlipX => sprite.flip_x(),
@@ -221,6 +233,9 @@ impl<'a> Chain<'a> {
                 Op::Offset(dx, dy) => sprite.offset(*dx, *dy),
                 Op::Pad(n) => sprite
                     .pad_within(*n, limits.max_sprite_side)
+                    .map_err(|e| token.error(e.code, e.message))?,
+                Op::Scale(n) => sprite
+                    .scale_with(*n, limits)
                     .map_err(|e| token.error(e.code, e.message))?,
                 Op::Swap(name) => {
                     let palette =
@@ -347,6 +362,10 @@ fn modifier<'a>(part: Token<'a>, limits: &Limits) -> Parsed<Op<'a>> {
             Ok(Op::Pad(
                 integer(a[0], 1, limits.max_sprite_side as i64)? as u32
             ))
+        }
+        "scale" => {
+            let a = expect(1, "scale(n)")?;
+            Ok(Op::Scale(integer(a[0], 2, 8)? as u32))
         }
         "swap" => {
             let a = expect(1, "swap(palette)")?;

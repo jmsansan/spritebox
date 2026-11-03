@@ -73,12 +73,14 @@ are rendered with spritebox. See the [Rust generator](examples/night_shift.rs),
 | Resizable nine/three-slice panels, shadows and static text with kerning | Available |
 | Widget states, fixed-grid icon sets, themes and composed UI screens | Available |
 | Layered backgrounds, key surfaces, gradients, noise profiles, scatter and rational parallax | Available |
+| Layers in their own palettes, `scale(n)`, tiles as sprites and multi-color text | Available |
+| Stroked shapes, backgrounds inside backgrounds and enlarged background exports | Available |
 
 ## Install
 
 ```toml
 [dependencies]
-spritebox = "0.5"
+spritebox = "0.6"
 ```
 
 Rust 1.85 or newer. The command-line tool installs with
@@ -278,8 +280,27 @@ sprite hero 16x16 palette=field
 ```
 
 Every layer has the sprite's size; a layer made from another sprite must have the
-same size and palette. Layers are composited with the "over" operator on sRGB values,
-in integer arithmetic, so translucent colors blend the same on every platform.
+same size. Layers are composited with the "over" operator on sRGB values, in integer
+arithmetic, so translucent colors blend the same on every platform.
+
+A layer made from a sprite in another palette keeps that palette, so one sprite can
+combine, say, a stone in the colors of its rank with a glyph in the color of its
+element:
+
+```text
+sprite rune 16x16 palette=rank
+  layer stone = stone_gold      ; drawn with palette rank
+  layer glyph = glyph_frost     ; keeps palette frost
+```
+
+![A stone in palette stone, a glyph in palette frost, and the two runes made of them, the second with its glyph swapped to palette ember](https://raw.githubusercontent.com/jmsansan/spritebox/main/docs/layer-palettes.png)
+
+Each layer is colored by its own palette, then the layers are composited as above.
+`flip_*`, `rot*`, `offset`, `pad`, `size` and `shadow` work on such a sprite;
+`outline(KEY)` and `shadow(KEY,...)` take `KEY` from the sprite's declared palette.
+`swap(...)` is an error that names each layer's palette, and a sprite that mixes
+palettes cannot be a tile. Themes recolor each layer drawn with their palette. Rust
+has `Sprite::mixes_palettes` and `Sprite::layer_palettes`.
 
 ### Procedural textures
 
@@ -321,10 +342,13 @@ same chains name the frames of animations and the layers of sprites.
 | `rot90`, `rot180`, `rot270` | Rotated clockwise; a quarter turn swaps width and height |
 | `offset(dx,dy)` | Pixels moved right and down (negative: left and up) within the same size; pixels moved out are lost |
 | `pad(n)` | `n` empty pixels added on every side |
+| `scale(n)` | Every pixel enlarged to an `n` × `n` block, `n` from 2 to 8, with no filtering; slice insets are multiplied by `n` |
 | `swap(PALETTE)` | The same keys colored by another palette, which must have every key the sprite uses |
 | `outline(KEY)` | A one-pixel outline of `KEY` on the transparent pixels that share an edge with visible ones, as a new bottom layer; pad first if the shape touches the edges |
 | `size(WxH[,tile])` | Resize a panel while retaining its corners and slice insets; stretch by default |
 | `shadow(KEY,dx,dy[,hard\|long])` | An offset silhouette below the sprite; grow the canvas and slice borders on that side. Offsets are -8..=8; `long` joins the original and offset silhouettes |
+
+![One rune at 1x, scale(2) and scale(3)](https://raw.githubusercontent.com/jmsansan/spritebox/main/docs/scale.png)
 
 ```text
 sprite coin_night = coin:swap(dusk)
@@ -335,11 +359,30 @@ sprite gem_glow = gem:pad(1):outline(y)
 Sprites may be derived from derived sprites, in any order in the file, but not in a
 circle.
 
+**Tiles as sprites.** A chain may also start from a tile of a tileset, written
+`TILESET.TILE`, wherever a chain starts: derived sprites, layers, animation frames,
+screens, tiles of other tilesets, and `place sprite` and scatter variants in
+backgrounds. The tile has the tileset's tile size and palette:
+
+```text
+sprite lone_tomb = graveyard.tomb2:flip_x
+background menu 480x270
+  layer props 480x270
+    place sprite graveyard.tomb2 at=40,200 anchor=bottom-left
+```
+
+![A tilemap's tombstone tile, and the same tile as a sprite, scaled up in an inventory slot](https://raw.githubusercontent.com/jmsansan/spritebox/main/docs/tile-sprites.png)
+
+A sprite whose name is the same dotted name wins. Only `tile` entries are sprites
+this way, not a terrain's pieces or variants. An unknown tileset or tile is an
+error that lists the tilesets, or the tileset's tiles.
+
 Shadows use ordinary palette colors, including alpha, and the same integer
 source-over as other layers. Long-shadow overlaps are drawn once, so translucent
 shadows do not get darker at overlapping steps. Rust has `Sprite::shadow` and
-`shadow_with`, with `Shadow::Hard` or `Shadow::Long`. Growing modifiers enforce
-image, sprite and layer limits before allocating their result.
+`shadow_with`, with `Shadow::Hard` or `Shadow::Long`, and `Sprite::scale` and
+`scale_with`. Growing modifiers enforce image, sprite and layer limits before
+allocating their result.
 
 ### Animations
 
@@ -604,6 +647,21 @@ spaces are trimmed, and indented blank lines add a line. A whole word such as
 syntax. Missing glyphs are errors at their source character, rather than fallback
 glyphs. Rust has `Font::sprite`/`sprite_with` and `TextOptions` with `Align`.
 
+**Colors inside a text.** `{KEY}` switches to palette key `KEY` for the characters
+after it, across line breaks, and `{}` returns to `color=`:
+
+```text
+text loot font=hud palette=ui color=g width=120
+  {b}+12 %{} damage
+```
+
+![The text "+12 % damage" with the number in blue](https://raw.githubusercontent.com/jmsansan/spritebox/main/docs/text-colors.png)
+
+Kerning, wrapping and alignment are those of the same text in one color: only the
+keys of the glyphs change. A key the palette lacks is an error at the key. Any
+other `{` is an error; write the whole word `U+007B` for a literal `{`. Rust has
+`Font::sprite_runs`/`sprite_runs_with`, which take `(key, text)` runs.
+
 Fonts accept optional `kern AV -1` entries, or escaped pairs such as
 `kern U+0041,U+0056 -1`. Both glyphs must exist. An adjustment cannot move the pen
 before its preceding glyph. `Font::kern` returns the adjustment in pixels;
@@ -704,8 +762,9 @@ imported filenames, and accept ordinary lint suppression.
 
 Describe finite static scenes with palette-key surfaces and ordered native layers.
 Paint rectangles, lines, polygons, ellipses, banded/Bayer gradients and reusable
-noise profiles. Place sprites, textures and cropped tilemaps, or scatter weighted
-sprite variants along a terrain profile. Themes recolor retained keys without
+noise profiles, and stroke rectangles and ellipses. Place sprites, textures, tiles,
+cropped tilemaps and other backgrounds, or scatter weighted sprite variants along a
+terrain profile. Themes recolor retained keys without
 moving generated geometry or placements.
 
 ![Background generated from text](docs/backgrounds.png)
@@ -718,6 +777,19 @@ Backgrounds stay outside sprite atlases; their PNGs retain native dimensions.
 spritebox render examples/backgrounds.spritebox --out out/backgrounds --theme all
 spritebox render examples/backgrounds.spritebox --out out/camera --background harbor --camera -64,0 --background-mode both
 ```
+
+The concept art of a graveyard tower defense, in
+[examples/first_game.spritebox](examples/first_game.spritebox): a board of tiles,
+stroked range rings and runes, placed whole inside the interface mockup, beside a
+tooltip with a scaled rune and a two-color loot text. Each picture in this README of
+a 0.6 feature is a panel of
+[examples/first_game_gallery.spritebox](examples/first_game_gallery.spritebox),
+written with `spritebox render examples/first_game_gallery.spritebox --out out/gallery
+--background-scale 4`.
+
+![An interface mockup: a graveyard board with tombstones, range rings and runes, placed inside it, and a tooltip](https://raw.githubusercontent.com/jmsansan/spritebox/main/docs/first-game-mockup.png)
+
+![Filled rectangles and ellipses, then their 1- and 2-pixel strokes; a ring keeps what is inside it](https://raw.githubusercontent.com/jmsansan/spritebox/main/docs/strokes.png)
 
 See [the background reference](docs/backgrounds.md) for grammar, Rust builders,
 coverage rules, seed vectors, resource budgets and the reconstruction schema.
@@ -922,7 +994,8 @@ fn art(embedded: &std::collections::HashMap<&str, &str>) -> spritebox::Result<sp
 spritebox check <file> [--json]
 spritebox lint <file> [--strict] [--allow <code>]... [--deny <code>]... [--json]
 spritebox render <file> --out <dir> [--scale <n>] [--padding <n>] [--no-extrude]
-                 [--max-side <n>] [--lint] [--json]
+                 [--max-side <n>] [--lint] [--json] [--background <name>] [--camera <x,y>]
+                 [--background-mode <mode>] [--background-scale <n>]
 spritebox font <file> --out <font.ttf> [--font <name>] [--family <name>] [--json]
 ```
 
@@ -938,7 +1011,12 @@ spritebox font <file> --out <font.ttf> [--font <name>] [--family <name>] [--json
   `preview.png` to `<dir>`. Nothing is written when the file
   has errors. `--scale` sets the preview's scale, and `--padding` and `--extrude`
   the atlas's. `--lint` marks lint's warnings on the preview's sprites, with a
-  legend (`PreviewOptions::lint` in the library).
+  legend (`PreviewOptions::lint` in the library). Background PNGs keep their
+  native size; `--background-scale <n>`, 2 to 8, also writes each of them, flat,
+  layer or themed, enlarged `n` times without filtering, as
+  `background-NNNN@<n>x.png` and `background-NNNN-layer-NNNN@<n>x.png`. The native
+  files and the metadata are unchanged, and each enlarged image is checked against
+  the image limits before anything is written.
 - `font` validates a file, then writes one of its fonts as TrueType: the only one,
   or the one `--font` names. `--family` sets the family name in the file.
 - `<file>` may be `-` for standard input.

@@ -6,12 +6,13 @@ use spritebox::{
     Document, Error, ErrorCode, Limits, LintCode, LintOptions, Warning, check, check_with_loader,
 };
 
-const EXAMPLES: [&str; 5] = [
+const EXAMPLES: [&str; 6] = [
     include_str!("../examples/coin.spritebox"),
     include_str!("../examples/showcase.spritebox"),
     include_str!("../examples/tiles.spritebox"),
     include_str!("../examples/font.spritebox"),
     include_str!("../examples/textures.spritebox"),
+    include_str!("../examples/first_game.spritebox"),
 ];
 
 /// Lines 1 to 7; `h` is a shade of `g` too close to tell apart, and `w` a glint.

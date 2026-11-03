@@ -101,8 +101,10 @@
 //! `sprite NAME = CHAIN` builds a sprite from another with a modifier chain: a name
 //! and `:modifier`s applied left to right, without spaces, such as
 //! `coin:flip_x:swap(dusk):outline(k)`. The modifiers are `flip_x`, `flip_y`, `rot90`,
-//! `rot180`, `rot270` (clockwise), `offset(dx,dy)`, `pad(n)`, `swap(palette)` and
-//! `outline(key)`; [`Sprite`] has a method for each.
+//! `rot180`, `rot270` (clockwise), `offset(dx,dy)`, `pad(n)`, `scale(n)`,
+//! `swap(palette)`, `outline(key)`, `size(WxH)` and `shadow(key,dx,dy)`; [`Sprite`]
+//! has a method for each. A chain may start from a sprite or from a tileset's tile,
+//! written `TILESET.TILE`.
 //!
 //! ## Animations
 //!

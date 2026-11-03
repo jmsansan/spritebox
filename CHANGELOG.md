@@ -1,5 +1,50 @@
 # Changelog
 
+## 0.6.0
+
+The limits found while drawing the concept art of the first game made with
+spritebox (#55). `examples/first_game.spritebox` uses every addition, and
+`examples/first_game_gallery.spritebox` draws the README's picture of each.
+
+### Added
+
+- Layers with their own palettes (#56): `layer NAME = CHAIN` may name a sprite in
+  another palette, which colors that layer; layers are composited with the same
+  source-over. `flip_*`, `rot*`, `offset`, `pad`, `size` and `shadow` keep working,
+  and `outline`/`shadow` keys come from the sprite's declared palette. Themes recolor
+  each layer by its palette. `Sprite::mixes_palettes` and `Sprite::layer_palettes`.
+- `scale(n)` (#57): every pixel becomes an n × n block, n from 2 to 8, with no
+  filtering; panel insets and metadata sizes are multiplied by n, and limits are
+  checked before allocating. `Sprite::scale` and `scale_with`.
+- `stroke=N` on surface `rect` and `ellipse` (#58): the filled shape minus the same
+  shape shrunk by N, so a shape and its stroke meet exactly; keys inside the ring
+  are kept. `SurfaceBuilder::stroke`.
+- `place background NAME [layer=LAYER]` (#59) draws another background's flat image
+  at camera 0,0, or one of its layers as it appears there, with crop and anchor.
+  Forward references work, circles are errors naming the chain, nesting is bounded
+  by `max_nesting`, and the placed background spends the placing one's budget.
+  `SourceRef::Background { name, layer }`.
+- `TILESET.TILE` wherever a chain starts (#60): derived sprites, layers, animation
+  frames, screens, tiles and background placements. Unknown tilesets or tiles list
+  what exists.
+- Colors inside a text (#61): `{KEY}` switches to a palette key and `{}` returns to
+  `color=`, with the glyph positions, kerning, wrapping and alignment of one color.
+  `Font::sprite_runs` and `sprite_runs_with`.
+- `render --background-scale N` (#62), 2 to 8, also writes every background PNG,
+  flat, layer and themed, enlarged without filtering as `STEM@Nx.png`. Native files
+  and metadata are unchanged.
+
+### Changed
+
+- **Breaking:** `SourceRef` has a new `Background` variant, so exhaustive matches
+  on it need another arm. This is why the release is 0.6.0.
+- **Breaking:** in a `text`, `{` starts a color switch. Write the word `U+007B` for
+  a literal `{`.
+- A sprite whose layers mix palettes cannot be swapped with `swap(...)` (a
+  positioned error naming each layer's palette) or be a tile.
+- Preserve Rust 1.85, safe Rust, zero production dependencies and in-memory WASM.
+  Existing examples keep their atlas metadata, golden pixels and lint results.
+
 ## 0.5.0
 
 ### Added

@@ -1,6 +1,7 @@
 # Backgrounds: finite scenes, surfaces and parallax
 
-Version 0.5 adds static backgrounds built from native layers. A surface is a
+Version 0.5 added static backgrounds built from native layers; 0.6 adds stroked
+shapes, tiles as sprites and backgrounds placed inside backgrounds. A surface is a
 single-palette grid of authored keys, separate from a sprite. A layer can combine
 surfaces, sprites (including textures and modifier chains) and tilemaps with
 different palettes. Backgrounds and surfaces never become implicit atlas entries.
@@ -44,7 +45,7 @@ assert_eq!(export.backgrounds[0].layers[0].image.height(), 6);
 objects. `Surface::key` returns `None` for EMPTY or out-of-bounds cells;
 `Surface::profile(name).heights()` exposes original y boundaries.
 `Surface::builder` paints typed `Primitive`, `Gradient` and `ProfileOptions`
-operations within explicit limits. `Background::builder` adds named layers,
+operations within explicit limits, and strokes rectangles and ellipses. `Background::builder` adds named layers,
 `SourceRef` placements and weighted scatter groups using the same generator as
 text parsing. `finish` returns an immutable object. `Document::with_surface` and
 `with_background` insert validated objects into a new document; references must
@@ -67,14 +68,48 @@ canvas and repeat period. Sizes must be positive. Positions are signed i32,
 with +x right and +y down. Native layer dimensions fit signed coordinates.
 `at` defaults to `0,0` on layers and is required on ordinary placements.
 Names use ASCII letters, digits, `_` and `-`; surface/background namespaces are
-distinct. Forward and imported references work. Nested backgrounds/screens do
-not belong in a background. Core APIs perform no filesystem I/O.
+distinct. Forward and imported references work. Screens do not belong in a
+background; another background does, as below. Core APIs perform no filesystem I/O.
 
 `crop=x,y,w,h` is a positive in-bounds source rectangle. Crop is applied first,
 then the anchor: `top-left` subtracts nothing, `bottom-left` subtracts the cropped
 height, and `center` subtracts floor(width/2), floor(height/2). Placements clip to
 the native layer. The optional in-bounds layer `clip` is baked after composing
 items. All rectangle bounds are half-open.
+
+## Backgrounds inside backgrounds
+
+```text
+background board 256x256
+  layer ground 256x256
+    place surface grass at=0,0
+  layer units 256x256
+    place sprite tower at=40,60
+background shop 600x270
+  layer board 600x270
+    place background board at=172,7
+  layer hud 600x270
+    place background board layer=units at=8,8 crop=0,0,128,128
+```
+
+![A board background placed whole inside an interface mockup](https://raw.githubusercontent.com/jmsansan/spritebox/main/docs/first-game-mockup.png)
+
+`place background NAME [layer=LAYER] at=X,Y [crop=...] [anchor=...]` draws another
+background into a layer. Without `layer=`, the source is the placed background's
+flat image at camera 0,0; with it, only that layer, as it appears in that flat
+image (its origin, repeat and clip applied, at camera 0,0). Either way the source
+has the placed background's size, which `crop` and `anchor` refer to. The placed
+background is drawn as an image, with the usual source-over, so pixels equal a copy
+of its placements in a layer with nothing under them. It is never moved by the
+outer camera's parallax inside the outer layer.
+
+Placed backgrounds may be defined later in the file or imported. A circle, such as
+`a` placing `b` placing `a`, is an error at the placement that closes it, naming the
+chain `a -> b -> a`; so is nesting deeper than `Limits::max_nesting`. An unknown
+layer is an error that lists the background's layers. Rendering a placed background
+spends the storage and work budget of the background that places it, every time it
+is placed. Themes recolor placed backgrounds too. Exports keep backgrounds in
+written order. In Rust, place `SourceRef::Background { name, layer }`.
 
 Items draw in source order onto transparent straight RGBA8 native layers. Then
 layers draw in source order over the transparent viewport using `Color::over`.
@@ -105,6 +140,8 @@ surface buildings 128x96 palette=world seed=0
   line aerial from=24,10 to=24,31 key=k
   polygon roof key=r points=4,32 28,12 52,32
   ellipse moon at=84,8 size=24x24 key=m
+  ellipse range at=60,40 size=33x21 key=k stroke=1
+  rect frame at=0,0 size=128x96 key=k stroke=2
 ```
 
 All operations are named; names are unique within their owning surface.
@@ -124,6 +161,16 @@ signed area are required; repeated vertices, intersections and overlapping edges
 are errors. Reversing winding preserves coverage. Ellipses sample pixel centers
 inside a positive bounding box using exact wide integer arithmetic. None of these
 operations adds antialiasing or intermediate RGB values.
+
+![Filled shapes, their strokes 1 and 2 pixels wide, and a ring over another color](https://raw.githubusercontent.com/jmsansan/spritebox/main/docs/strokes.png)
+
+`stroke=N` (N >= 1) on a `rect` or an `ellipse` paints only the band N pixels wide
+inside the shape's edge: exactly the pixels of the filled shape minus those of the
+same shape shrunk by N on every side (`at` + N, `size` - 2N), with the same
+coverage rules, so a filled shape and its stroke meet exactly. Keys inside the ring
+are kept. When the shape is no more than 2N wide or high, the shrunk shape is empty
+and the whole shape is painted. Lines and polygons have no `stroke=`. Rust has
+`SurfaceBuilder::stroke`.
 
 ## Key gradients
 
@@ -249,7 +296,11 @@ spritebox render examples/backgrounds.spritebox --out out/camera --background ha
 Background selectors/camera/mode apply only to directory `render`, and reject
 duplicate flags or unknown names. `--max-side` remains the atlas/tileset limit;
 background PNGs use image limits and retain native dimensions regardless of
-sprite preview `--scale`. All outputs and the preview validate before first write.
+sprite preview `--scale`. `--background-scale N` (2..=8) also writes every exported
+background PNG enlarged N times by pixel replication, as `STEM@Nx.png` beside
+`STEM.png` (for example `background-0000@3x.png`); native files and metadata are
+byte-identical with and without it. All outputs and the preview validate before
+first write.
 
 Background thumbnails use divisor=max(1,ceil(W/320),ceil(H/180)), output
 ceil(W/divisor) by ceil(H/divisor), and nearest samples at coordinate*divisor.
