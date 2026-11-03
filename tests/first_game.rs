@@ -102,7 +102,10 @@ fn swapping_a_mixed_sprite_is_a_positioned_error() {
     assert_eq!(found.len(), 1, "{found:?}");
     let (line, column, code, message) = &found[0];
     // At the palette that `swap` names.
-    assert_eq!((*line, *column, *code), (21, 26, ErrorCode::InvalidArgument));
+    assert_eq!(
+        (*line, *column, *code),
+        (21, 26, ErrorCode::InvalidArgument)
+    );
     assert!(
         message.contains("`stone` uses `rank`") && message.contains("`glyph` uses `frost`"),
         "{message}"
@@ -321,9 +324,8 @@ fn strokes_keep_what_is_inside_the_ring() {
         ]
     );
     // A stroke at least half the shape's size fills it.
-    let full = parse(
-        "palette p\n  b #ffffff\nsurface s 4x3\n  rect r at=0,0 size=4x3 key=b stroke=2\n",
-    );
+    let full =
+        parse("palette p\n  b #ffffff\nsurface s 4x3\n  rect r at=0,0 size=4x3 key=b stroke=2\n");
     assert_eq!(surface_rows(&full, "s"), ["bbbb", "bbbb", "bbbb"]);
 }
 
@@ -332,13 +334,23 @@ fn stroke_errors_and_the_builder() {
     let base = "palette p\n  b #ffffff\nsurface s 8x8\n";
     let found = errors(&format!("{base}  line l from=0,0 to=7,7 key=b stroke=1\n"));
     assert_eq!(found.len(), 1, "{found:?}");
-    assert_eq!((found[0].0, found[0].1, found[0].2), (4, 39, ErrorCode::Syntax));
+    assert_eq!(
+        (found[0].0, found[0].1, found[0].2),
+        (4, 39, ErrorCode::Syntax)
+    );
     let found = errors(&format!("{base}  rect r at=0,0 size=4x4 key=b stroke=0\n"));
-    assert_eq!((found[0].0, found[0].1, found[0].2), (4, 39, ErrorCode::InvalidArgument));
-    let found = errors(&format!("{base}  ellipse e at=0,0 size=4x4 key=b stroke=x\n"));
+    assert_eq!(
+        (found[0].0, found[0].1, found[0].2),
+        (4, 39, ErrorCode::InvalidArgument)
+    );
+    let found = errors(&format!(
+        "{base}  ellipse e at=0,0 size=4x4 key=b stroke=x\n"
+    ));
     assert_eq!(found[0].2, ErrorCode::InvalidArgument);
 
-    let doc = parse(&format!("{base}  ellipse e at=1,1 size=6x6 key=b stroke=1\n"));
+    let doc = parse(&format!(
+        "{base}  ellipse e at=1,1 size=6x6 key=b stroke=1\n"
+    ));
     let palette = doc.palette("p").unwrap();
     let mut builder =
         spritebox::Surface::builder("s", 8, 8, palette, 0, &Limits::default()).unwrap();
@@ -443,8 +455,14 @@ background yard 12x6
 "
     ));
     let tileset = doc.tileset("graveyard").unwrap();
-    let tomb1 = tileset.tile(tileset.index("tomb1").unwrap()).unwrap().render();
-    let tomb2 = tileset.tile(tileset.index("tomb2").unwrap()).unwrap().render();
+    let tomb1 = tileset
+        .tile(tileset.index("tomb1").unwrap())
+        .unwrap()
+        .render();
+    let tomb2 = tileset
+        .tile(tileset.index("tomb2").unwrap())
+        .unwrap()
+        .render();
     let flat = doc
         .background("yard")
         .unwrap()
@@ -549,10 +567,7 @@ fn tile_references_follow_sprite_rules() {
     let found = errors(&format!(
         "{GRAVEYARD}tileset loop 4x4 palette=night\n  tile t = ring\nsprite ring = loop.t\n"
     ));
-    assert!(
-        found.iter().any(|e| e.2 == ErrorCode::Cycle),
-        "{found:?}"
-    );
+    assert!(found.iter().any(|e| e.2 == ErrorCode::Cycle), "{found:?}");
     // A tile with errors reports them once, at the tile.
     let found = errors(&format!(
         "{GRAVEYARD}tileset bad 4x4 palette=night\n  tile t = missing\nsprite s = bad.t\n"
@@ -654,7 +669,7 @@ theme dusk of world
   g #a04040
 background mockup 64x48
   layer view 64x48
-    place background board layer=map at=0,0 crop=60,40,40,30 anchor=bottom-left
+    place background board layer=map at=0,30 crop=60,40,40,30 anchor=bottom-left
     place background board layer=units at=60,40 anchor=center
 background board 256x256
   layer map 256x256 at=2,0
@@ -664,8 +679,9 @@ background board 256x256
 "
     );
     let doc = parse(&text);
-    let board = doc.background("board").unwrap();
+    // A layer alone, as it appears in the board's flat image.
     let only_layer = |doc: &Document, layer: usize| {
+        let board = doc.background("board").unwrap();
         let mut builder =
             spritebox::Background::builder(doc, "one", (256, 256), 0, &Limits::default()).unwrap();
         let source = &board.layers()[layer];
@@ -687,8 +703,11 @@ background board 256x256
             .unwrap();
         for y in 0..48u32 {
             for x in 0..64u32 {
-                // The crop's bottom-left corner is at 0,0, so it is above the view.
+                // The crop's bottom-left corner is at 0,30: it covers 0..40, 0..30.
                 let mut want = spritebox::Color::TRANSPARENT;
+                if x < 40 && y < 30 {
+                    want = map.pixel(60 + x, 40 + y).unwrap();
+                }
                 let (ux, uy) = (x as i64 - 60 + 128, y as i64 - 40 + 128);
                 if (0..256).contains(&ux) && (0..256).contains(&uy) {
                     want = units.pixel(ux as u32, uy as u32).unwrap().over(want);
@@ -696,28 +715,16 @@ background board 256x256
                 assert_eq!(mockup.pixel(x, y), Some(want), "{x},{y}");
             }
         }
+        mockup
     };
-    check(&doc);
-    // The cropped map, placed at the top-left instead.
-    let top = parse(&text.replace("anchor=bottom-left", "anchor=top-left"));
-    let map = only_layer(&top, 0);
-    let mockup = top
-        .background("mockup")
-        .unwrap()
-        .render(&top, &Default::default())
-        .unwrap();
-    assert_eq!(mockup.pixel(0, 0), map.pixel(60, 40));
-    assert_eq!(mockup.pixel(39, 29), map.pixel(99, 69));
-    assert_eq!(mockup.pixel(40, 0), Some(spritebox::Color::TRANSPARENT));
-    // Themes recolor the placed background.
-    let dusk = top.with_theme("dusk").unwrap();
-    let themed = dusk
-        .background("mockup")
-        .unwrap()
-        .render(&dusk, &Default::default())
-        .unwrap();
-    assert_eq!(themed.pixel(20, 10), Some(Color::rgb(0xa0, 0x40, 0x40)));
+    let mockup = check(&doc);
+    // The map layer's origin moves it right by 2 in the flat image.
+    assert_eq!(mockup.pixel(20, 10), only_layer(&doc, 0).pixel(80, 50));
     assert_eq!(mockup.pixel(20, 10), Some(Color::rgb(0x40, 0xa0, 0x40)));
+    // Themes recolor the placed background.
+    let dusk = doc.with_theme("dusk").unwrap();
+    let themed = check(&dusk);
+    assert_eq!(themed.pixel(20, 10), Some(Color::rgb(0xa0, 0x40, 0x40)));
 }
 
 #[test]
@@ -748,10 +755,30 @@ background d 8x8
     assert_eq!(found.len(), 1, "{found:?}");
     assert!(found[0].3.contains("a -> a"), "{}", found[0].3);
     let cases = [
-        ("place background nope at=0,0", ErrorCode::UnknownName, 22, "Unknown background `nope`"),
-        ("place background a layer=sky at=0,0", ErrorCode::UnknownName, 30, "its layers are `l`"),
-        ("place background a at=0,0 crop=0,0,9,9", ErrorCode::InvalidArgument, 36, "Crop"),
-        ("place surface ground layer=l at=0,0", ErrorCode::Syntax, 32, "Unknown scene option"),
+        (
+            "place background nope at=0,0",
+            ErrorCode::UnknownName,
+            22,
+            "Unknown background `nope`",
+        ),
+        (
+            "place background a layer=sky at=0,0",
+            ErrorCode::UnknownName,
+            30,
+            "its layers are `l`",
+        ),
+        (
+            "place background a at=0,0 crop=0,0,9,9",
+            ErrorCode::InvalidArgument,
+            36,
+            "Crop",
+        ),
+        (
+            "place surface ground layer=l at=0,0",
+            ErrorCode::Syntax,
+            32,
+            "Unknown scene option",
+        ),
     ];
     for (line, code, column, message) in cases {
         let text = format!(
@@ -760,7 +787,11 @@ background d 8x8
         );
         let found = errors(&text);
         assert_eq!(found.len(), 1, "{line}: {found:?}");
-        assert_eq!((found[0].0, found[0].1, found[0].2), (21, column, code), "{line}");
+        assert_eq!(
+            (found[0].0, found[0].1, found[0].2),
+            (21, column, code),
+            "{line}"
+        );
         assert!(found[0].3.contains(message), "{line}: {}", found[0].3);
     }
     // Nesting deeper than the limit.
@@ -799,9 +830,14 @@ background mockup 256x256
     let mockup = doc.background("mockup").unwrap();
     // Rendering the board alone fits a budget that the mockup, which draws the board
     // as well as its own layer, exceeds.
-    let mut limits = Limits::default();
-    limits.max_scene_work = 1;
-    while board.render_with(&doc, &Default::default(), &limits).is_err() {
+    let mut limits = Limits {
+        max_scene_work: 1,
+        ..Limits::default()
+    };
+    while board
+        .render_with(&doc, &Default::default(), &limits)
+        .is_err()
+    {
         limits.max_scene_work *= 2;
     }
     let error = mockup
@@ -894,9 +930,17 @@ text colored font=hud color=g width=9 align=center
     assert_eq!(
         colored,
         [
-            "  ggb    ", "  g b    ", "  gg b   ", "         ", //
-            "bby  yy  ", "b y  y   ", "bb y yy  ", "         ", //
-            " y  gg   ", " y  g    ", "  y gg   ",
+            "  ggb    ",
+            "  g b    ",
+            "  gg b   ",
+            "         ", //
+            "bby  yy  ",
+            "b y  y   ",
+            "bb y yy  ",
+            "         ", //
+            " y  gg   ",
+            " y  g    ",
+            "  y gg   ",
         ]
     );
 }
@@ -908,14 +952,20 @@ fn every_glyph_has_its_color_across_lines() {
     ));
     assert_eq!(
         key_rows(&doc, "t"),
-        ["gg bb ", "g  b  ", "gg bb ", "      ", "bb gg ", "b  g  ", "bb gg "]
+        [
+            "gg bb ", "g  b  ", "gg bb ", "      ", "bb gg ", "b  g  ", "bb gg "
+        ]
     );
     // U+007B writes a literal `{`, in the current color.
     assert_eq!(key_rows(&doc, "u"), [" y  gg ", "y   g  ", " y  gg "]);
     let font = doc.font("hud").unwrap();
     let palette = doc.palette("p").unwrap();
     let runs = font
-        .sprite_runs(&[('g', "A"), ('b', "A\nA"), ('g', "A")], palette, &Default::default())
+        .sprite_runs(
+            &[('g', "A"), ('b', "A\nA"), ('g', "A")],
+            palette,
+            &Default::default(),
+        )
         .unwrap();
     let t = doc.sprite("t").unwrap();
     for y in 0..t.height() {
@@ -934,7 +984,12 @@ fn every_glyph_has_its_color_across_lines() {
 #[test]
 fn color_switch_errors_are_positioned() {
     let cases = [
-        ("  AV{z}A\n", (21, 6), ErrorCode::UnknownName, "Unknown text color `z`"),
+        (
+            "  AV{z}A\n",
+            (21, 6),
+            ErrorCode::UnknownName,
+            "Unknown text color `z`",
+        ),
         ("  A{zz}A\n", (21, 4), ErrorCode::Syntax, "U+007B"),
         ("  A{\n", (21, 4), ErrorCode::Syntax, "U+007B"),
         ("  A{ }A\n", (21, 4), ErrorCode::Syntax, "U+007B"),
@@ -945,4 +1000,38 @@ fn color_switch_errors_are_positioned() {
         assert_eq!(((found[0].0, found[0].1), found[0].2), (at, code), "{body}");
         assert!(found[0].3.contains(message), "{body}{}", found[0].3);
     }
+}
+
+// --- The example ------------------------------------------------------------------
+
+#[test]
+fn the_example_uses_every_feature() {
+    let text = include_str!("../examples/first_game.spritebox");
+    let doc = parse(text);
+    assert!(doc.sprite("frost_rune").unwrap().mixes_palettes());
+    assert!(doc.sprite("ember_rune").unwrap().mixes_palettes());
+    assert_eq!(doc.sprite("frost_rune_large").unwrap().width(), 24);
+    let loot = doc.sprite("loot").unwrap();
+    let keys: std::collections::BTreeSet<char> = (0..loot.height())
+        .flat_map(|y| (0..loot.width()).filter_map(move |x| loot.key(x, y)))
+        .collect();
+    assert_eq!(keys.into_iter().collect::<String>(), "bt");
+    let mockup = doc.background("mockup").unwrap();
+    assert!(matches!(
+        mockup.layers()[0].placements()[0].source(),
+        spritebox::SourceRef::Background { .. }
+    ));
+    let flat = mockup.render(&doc, &Default::default()).unwrap();
+    let board = doc
+        .background("board")
+        .unwrap()
+        .render(&doc, &Default::default())
+        .unwrap();
+    assert_eq!(flat.pixel(60, 50), board.pixel(60, 50));
+    // The range ring is stroked: its inside keeps the ground.
+    assert_eq!(flat.pixel(94, 52), board.pixel(94, 52));
+    assert_ne!(
+        doc.surface("rings").unwrap().key(94, 34),
+        doc.surface("rings").unwrap().key(94, 52)
+    );
 }

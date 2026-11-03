@@ -8,10 +8,12 @@ pub(super) struct TextDef<'a> {
     pub palette: Option<Token<'a>>,
     pub color: Token<'a>,
     pub options: TextOptions,
-    /// Each character, where it is written, and the key that `{KEY}` switched to
-    /// before it, with where the key is written; `None` for `color=`.
-    pub lines: Vec<Vec<(char, Position, Option<(char, Position)>)>>,
+    pub lines: Vec<Vec<Lettered>>,
 }
+
+/// A character of a text, where it is written, and the key that `{KEY}` switched to
+/// before it, with where the key is written; `None` for `color=`.
+pub(super) type Lettered = (char, Position, Option<(char, Position)>);
 
 impl<'a> Parser<'a, '_> {
     pub(super) fn text_sprite(&mut self, node: &Node<'a>) -> Parsed<()> {

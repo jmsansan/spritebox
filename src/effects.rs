@@ -119,9 +119,11 @@ impl Sprite {
             right: i.right * n,
             bottom: i.bottom * n,
         });
-        Ok(self.derive(&format!("scale({n})"), width, height, slice, |x, y| {
-            Some((x / n, y / n))
-        }))
+        Ok(
+            self.derive(&format!("scale({n})"), width, height, slice, |x, y| {
+                Some((x / n, y / n))
+            }),
+        )
     }
 
     /// Draw an offset silhouette beneath this sprite. The canvas grows, and panel

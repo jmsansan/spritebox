@@ -199,7 +199,10 @@ impl Surface {
             if n == 0 {
                 return Err(Error::invalid("Stroke width must be positive"));
             }
-            if !matches!(primitive, Primitive::Rect { .. } | Primitive::Ellipse { .. }) {
+            if !matches!(
+                primitive,
+                Primitive::Rect { .. } | Primitive::Ellipse { .. }
+            ) {
                 return Err(Error::invalid(
                     "Only rectangles and ellipses can be stroked",
                 ));

@@ -501,11 +501,14 @@ impl SourceView<'_> {
 /// A sprite's pixel, with one lookup per layer, or one lookup for every layer.
 fn sprite_pixel(s: &Sprite, lookups: &[crate::sprite::ColorLookup<'_>], x: u32, y: u32) -> Color {
     let i = y as usize * s.width as usize + x as usize;
-    s.layers.iter().enumerate().fold(Color::TRANSPARENT, |c, (n, l)| {
-        lookups[if lookups.len() == 1 { 0 } else { n }]
-            .get(l.keys[i])
-            .over(c)
-    })
+    s.layers
+        .iter()
+        .enumerate()
+        .fold(Color::TRANSPARENT, |c, (n, l)| {
+            lookups[if lookups.len() == 1 { 0 } else { n }]
+                .get(l.keys[i])
+                .over(c)
+        })
 }
 impl BackgroundPlacement {
     pub(crate) fn view<'a>(&'a self, doc: &'a Document) -> Result<SourceView<'a>> {

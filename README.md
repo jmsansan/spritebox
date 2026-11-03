@@ -73,12 +73,14 @@ are rendered with spritebox. See the [Rust generator](examples/night_shift.rs),
 | Resizable nine/three-slice panels, shadows and static text with kerning | Available |
 | Widget states, fixed-grid icon sets, themes and composed UI screens | Available |
 | Layered backgrounds, key surfaces, gradients, noise profiles, scatter and rational parallax | Available |
+| Layers in their own palettes, `scale(n)`, tiles as sprites and multi-color text | Available |
+| Stroked shapes, backgrounds inside backgrounds and enlarged background exports | Available |
 
 ## Install
 
 ```toml
 [dependencies]
-spritebox = "0.5"
+spritebox = "0.6"
 ```
 
 Rust 1.85 or newer. The command-line tool installs with

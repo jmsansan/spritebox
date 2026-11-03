@@ -692,7 +692,10 @@ fn layer_errors() {
         (15, 13, SizeMismatch)
     );
     // A layer may keep the palette of the sprite it is made from.
-    assert_eq!(errors(&field("sprite l 3x2 palette=q\n  layer a = s\n")), []);
+    assert_eq!(
+        errors(&field("sprite l 3x2 palette=q\n  layer a = s\n")),
+        []
+    );
     assert_eq!(
         e("sprite l 3x2 palette=p\n  layer a = s x\n"),
         (15, 15, Syntax)

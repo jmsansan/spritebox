@@ -139,13 +139,10 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
                 match arg.as_str() {
                     "--background" => backgrounds.selection = Some(value.clone()),
                     "--background-scale" => {
-                        background_scale = Some(
-                            value
-                                .parse()
-                                .ok()
-                                .filter(|n| (2..=8).contains(n))
-                                .ok_or(format!("--background-scale must be 2..=8, not `{value}`"))?,
-                        );
+                        background_scale =
+                            Some(value.parse().ok().filter(|n| (2..=8).contains(n)).ok_or(
+                                format!("--background-scale must be 2..=8, not `{value}`"),
+                            )?);
                     }
                     "--camera" => {
                         let (x, y) = value.split_once(',').ok_or("--camera needs signed X,Y")?;

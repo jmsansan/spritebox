@@ -197,7 +197,11 @@ impl<'a> Parser<'a, '_> {
 
     /// The sprite or `TILESET.TILE` that a chain starts from, among `sprites` and the
     /// tiles built for chains.
-    pub(super) fn chain_base<'s>(&'s self, sprites: &'s [Sprite], name: &str) -> Option<&'s Sprite> {
+    pub(super) fn chain_base<'s>(
+        &'s self,
+        sprites: &'s [Sprite],
+        name: &str,
+    ) -> Option<&'s Sprite> {
         sprites
             .iter()
             .chain(&self.tile_sprites)

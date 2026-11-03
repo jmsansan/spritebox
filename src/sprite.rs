@@ -192,7 +192,11 @@ impl Sprite {
         let (top, _) = covering.clone().next()?;
         Some(
             covering
-                .find(|(n, layer)| self.layer_palette(*n).color(layer.keys[i]).is_some_and(|c| c.a > 0))
+                .find(|(n, layer)| {
+                    self.layer_palette(*n)
+                        .color(layer.keys[i])
+                        .is_some_and(|c| c.a > 0)
+                })
                 .map_or(top, |(n, _)| n),
         )
     }

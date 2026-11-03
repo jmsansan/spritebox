@@ -665,7 +665,11 @@ fn background_scale_writes_enlarged_copies_and_keeps_native_files() {
         // Every enlarged block equals its native pixel.
         for y in 0..big.height() {
             for x in 0..big.width() {
-                assert_eq!(big.pixel(x, y), small.pixel(x / 3, y / 3), "{big_name} {x},{y}");
+                assert_eq!(
+                    big.pixel(x, y),
+                    small.pixel(x / 3, y / 3),
+                    "{big_name} {x},{y}"
+                );
             }
         }
         enlarged += 1;
@@ -719,6 +723,10 @@ fn background_scale_writes_enlarged_copies_and_keeps_native_files() {
         "3",
     ]);
     assert_eq!(failed.status.code(), Some(1), "{}", stderr(&failed));
-    assert!(stderr(&failed).contains("enlarged 3 times"), "{}", stderr(&failed));
+    assert!(
+        stderr(&failed).contains("enlarged 3 times"),
+        "{}",
+        stderr(&failed)
+    );
     assert!(!huge_out.exists());
 }

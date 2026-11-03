@@ -856,12 +856,16 @@ impl<'a> Parser<'a, '_> {
                         .error(ErrorCode::DuplicateName, "Duplicate background"));
                 }
                 // A background placed here failed, or is in a circle: both reported.
-                let placed = def.layers.iter().flat_map(|l| &l.items).filter_map(|i| match i {
-                    ItemDef::Place { kind, source, .. } if kind.text == "background" => {
-                        Some(source.text)
-                    }
-                    _ => None,
-                });
+                let placed = def
+                    .layers
+                    .iter()
+                    .flat_map(|l| &l.items)
+                    .filter_map(|i| match i {
+                        ItemDef::Place { kind, source, .. } if kind.text == "background" => {
+                            Some(source.text)
+                        }
+                        _ => None,
+                    });
                 for name in placed {
                     let defined = backgrounds.iter().any(|b| b.name.text == name);
                     if defined && doc.background(name).is_none() {
@@ -920,12 +924,13 @@ impl<'a> Parser<'a, '_> {
                                     }
                                     "background" => {
                                         check_name(*source)?;
-                                        let placed = doc.background(source.text).ok_or_else(|| {
-                                            source.error(
-                                                ErrorCode::UnknownName,
-                                                format!("Unknown background `{}`", source.text),
-                                            )
-                                        })?;
+                                        let placed =
+                                            doc.background(source.text).ok_or_else(|| {
+                                                source.error(
+                                                    ErrorCode::UnknownName,
+                                                    format!("Unknown background `{}`", source.text),
+                                                )
+                                            })?;
                                         if let Some(t) = placed_layer {
                                             if !placed.layers().iter().any(|l| l.name() == t.text) {
                                                 let names: Vec<String> = placed
@@ -1084,8 +1089,10 @@ impl<'a> Parser<'a, '_> {
                 }
             }
         }
-        let mut ordered: Vec<(usize, Background)> =
-            built.into_iter().zip(std::mem::take(&mut doc.backgrounds)).collect();
+        let mut ordered: Vec<(usize, Background)> = built
+            .into_iter()
+            .zip(std::mem::take(&mut doc.backgrounds))
+            .collect();
         ordered.sort_by_key(|(index, _)| *index);
         doc.backgrounds = ordered.into_iter().map(|(_, b)| b).collect();
         self.backgrounds = backgrounds;

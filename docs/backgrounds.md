@@ -1,6 +1,7 @@
 # Backgrounds: finite scenes, surfaces and parallax
 
-Version 0.5 adds static backgrounds built from native layers. A surface is a
+Version 0.5 added static backgrounds built from native layers; 0.6 adds stroked
+shapes, tiles as sprites and backgrounds placed inside backgrounds. A surface is a
 single-palette grid of authored keys, separate from a sprite. A layer can combine
 surfaces, sprites (including textures and modifier chains) and tilemaps with
 different palettes. Backgrounds and surfaces never become implicit atlas entries.

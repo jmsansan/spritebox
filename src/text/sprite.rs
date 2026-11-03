@@ -597,7 +597,8 @@ impl<'a> Parser<'a, '_> {
                             let source_palette = sprite.palette;
                             for mut l in sprite.layers {
                                 l.name = layer_name.clone();
-                                let colors = l.palette.take().unwrap_or_else(|| source_palette.clone());
+                                let colors =
+                                    l.palette.take().unwrap_or_else(|| source_palette.clone());
                                 if Some(colors.name.as_str()) != own {
                                     l.palette = Some(colors);
                                 }
