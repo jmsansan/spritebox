@@ -72,13 +72,13 @@ pub(super) fn check(document: &Document, options: &LintOptions, limits: &Limits,
                     let mut text = false;
                     let mut backing = crate::Color::TRANSPARENT;
                     let pixel = sy as usize * sprite.width as usize + sx as usize;
-                    for layer in &sprite.layers {
+                    for (index, layer) in sprite.layers.iter().enumerate() {
                         let key = layer.keys[pixel];
                         if key == EMPTY {
                             continue;
                         }
                         let layer_color = sprite
-                            .palette
+                            .layer_palette(index)
                             .color(key)
                             .unwrap_or(crate::Color::TRANSPARENT);
                         let alpha = layer_color.a;

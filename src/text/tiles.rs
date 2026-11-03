@@ -651,6 +651,7 @@ impl<'a> Parser<'a, '_> {
                         text: false,
                         name: None,
                         keys,
+                        palette: None,
                     }],
                     slice: None,
                 })
@@ -688,17 +689,25 @@ impl<'a> Parser<'a, '_> {
                     ));
                     return None;
                 }
-                if sprite.palette.name != palette.name {
-                    self.errors.push(chain.base.error(
-                        ErrorCode::InvalidArgument,
+                if sprite.palette.name != palette.name || sprite.mixes_palettes() {
+                    let message = if sprite.mixes_palettes() {
+                        format!(
+                            "`{}` mixes palettes in its layers; the tiles of `{}` use only `{}`",
+                            chain.canonical(),
+                            def.name.text,
+                            palette.name
+                        )
+                    } else {
                         format!(
                             "`{}` uses palette `{}`; tileset `{}` uses `{}`",
                             chain.canonical(),
                             sprite.palette.name,
                             def.name.text,
                             palette.name
-                        ),
-                    ));
+                        )
+                    };
+                    self.errors
+                        .push(chain.base.error(ErrorCode::InvalidArgument, message));
                     return None;
                 }
                 sprite.name = name;

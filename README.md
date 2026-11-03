@@ -278,8 +278,25 @@ sprite hero 16x16 palette=field
 ```
 
 Every layer has the sprite's size; a layer made from another sprite must have the
-same size and palette. Layers are composited with the "over" operator on sRGB values,
-in integer arithmetic, so translucent colors blend the same on every platform.
+same size. Layers are composited with the "over" operator on sRGB values, in integer
+arithmetic, so translucent colors blend the same on every platform.
+
+A layer made from a sprite in another palette keeps that palette, so one sprite can
+combine, say, a stone in the colors of its rank with a glyph in the color of its
+element:
+
+```text
+sprite rune 16x16 palette=rank
+  layer stone = stone_gold      ; drawn with palette rank
+  layer glyph = glyph_frost     ; keeps palette frost
+```
+
+Each layer is colored by its own palette, then the layers are composited as above.
+`flip_*`, `rot*`, `offset`, `pad`, `size` and `shadow` work on such a sprite;
+`outline(KEY)` and `shadow(KEY,...)` take `KEY` from the sprite's declared palette.
+`swap(...)` is an error that names each layer's palette, and a sprite that mixes
+palettes cannot be a tile. Themes recolor each layer drawn with their palette. Rust
+has `Sprite::mixes_palettes` and `Sprite::layer_palettes`.
 
 ### Procedural textures
 

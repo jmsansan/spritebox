@@ -211,8 +211,8 @@ impl<'a> Chain<'a> {
             sprite
                 .effect_size(w, h, layers, limits)
                 .map_err(|e| token.error(e.code, e.message))?;
-            for key in sprite.keys() {
-                uses.insert((sprite.palette.name.clone(), key));
+            for (palette, key) in sprite.palette_keys() {
+                uses.insert((palette.to_owned(), key));
             }
             sprite = match op {
                 Op::FlipX => sprite.flip_x(),

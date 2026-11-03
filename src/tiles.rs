@@ -202,6 +202,7 @@ pub(crate) fn assemble(pieces: &[Sprite; 5], scheme: Scheme, mask: u8, name: Str
                 text: false,
                 name: None,
                 keys,
+                palette: None,
             })
             .collect(),
         slice: None,

@@ -156,6 +156,7 @@ impl Font {
                 text: true,
                 name: Some("text".into()),
                 keys,
+                palette: None,
             }],
             slice: None,
         })

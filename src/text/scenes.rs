@@ -729,8 +729,8 @@ impl<'a> Parser<'a, '_> {
             })?;
             let s =
                 chain.apply_scene(base, &doc.palettes, self.limits, &mut self.palette_uses, b)?;
-            for k in s.keys() {
-                self.palette_uses.insert((s.palette.name.clone(), k));
+            for (p, k) in s.palette_keys() {
+                self.palette_uses.insert((p.to_owned(), k));
             }
             let s = Arc::new(s);
             cache.insert(canonical.clone(), s.clone());

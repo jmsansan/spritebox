@@ -506,6 +506,7 @@ impl<'a> Parser<'a, '_> {
                                     text: false,
                                     name: layer_name,
                                     keys,
+                                    palette: None,
                                 }),
                                 None => ok = false,
                             }
@@ -528,21 +529,16 @@ impl<'a> Parser<'a, '_> {
                                 ok = false;
                                 continue;
                             }
-                            if let Some(p) = palette {
-                                if sprite.palette.name != p.name {
-                                    self.errors.push(chain.base.error(
-                                        ErrorCode::InvalidArgument,
-                                        format!(
-                                            "Layer `{}` uses palette `{}`; sprite `{}` uses `{}`",
-                                            token.text, sprite.palette.name, def.name.text, p.name
-                                        ),
-                                    ));
-                                    ok = false;
-                                    continue;
-                                }
-                            }
+                            // A layer in another palette keeps it: the sprite is then
+                            // composited from layers colored by different palettes.
+                            let own = palette.map(|p| p.name.as_str());
+                            let source_palette = sprite.palette;
                             for mut l in sprite.layers {
                                 l.name = layer_name.clone();
+                                let colors = l.palette.take().unwrap_or_else(|| source_palette.clone());
+                                if Some(colors.name.as_str()) != own {
+                                    l.palette = Some(colors);
+                                }
                                 out.push(l);
                             }
                         }

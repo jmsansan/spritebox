@@ -165,7 +165,7 @@ impl BackgroundLayer {
         let mut image = Image::new_with(self.width, self.height, limits)?;
         for item in &self.items {
             let source = item.view(doc)?;
-            let lookup = crate::sprite::ColorLookup::new(source.palette(doc));
+            let lookups = source.lookups(doc);
             let crop = item.crop(source.size()?)?;
             let (x, y) = item.top_left(crop);
             let (l, t, r, d) = crate::screen::placement_bounds(
@@ -184,7 +184,7 @@ impl BackgroundLayer {
             for py in t..d {
                 for px in l..r {
                     let color =
-                        source.pixel(&lookup, crop.x + (px - x) as u32, crop.y + (py - y) as u32);
+                        source.pixel(&lookups, crop.x + (px - x) as u32, crop.y + (py - y) as u32);
                     let below = image.pixel(px as u32, py as u32).unwrap();
                     image.set_pixel(px as u32, py as u32, color.over(below));
                 }
@@ -365,35 +365,42 @@ impl SourceView<'_> {
                 .unwrap_or(1),
         }
     }
-    fn palette<'a>(&'a self, doc: &'a Document) -> &'a crate::Palette {
-        let p = match self {
-            Self::Sprite(s) => &s.palette,
-            Self::Surface(s) => &s.palette,
-            Self::Tilemap(_, t) => &t.palette,
+    /// Color lookups in the document's current palettes, so that themes apply: one
+    /// per layer of a sprite, or one for a surface or tilemap.
+    fn lookups<'a>(&'a self, doc: &'a Document) -> Vec<crate::sprite::ColorLookup<'a>> {
+        let current = |p: &'a crate::Palette| {
+            crate::sprite::ColorLookup::new(doc.palette(p.name()).unwrap_or(p))
         };
-        doc.palette(p.name()).unwrap_or(p)
-    }
-    fn pixel(&self, lookup: &crate::sprite::ColorLookup<'_>, x: u32, y: u32) -> Color {
         match self {
-            Self::Sprite(s) => sprite_pixel(s, lookup, x, y),
+            Self::Sprite(s) => s.layer_palettes().map(current).collect(),
+            Self::Surface(s) => vec![current(&s.palette)],
+            Self::Tilemap(_, t) => vec![current(&t.palette)],
+        }
+    }
+    fn pixel(&self, lookups: &[crate::sprite::ColorLookup<'_>], x: u32, y: u32) -> Color {
+        match self {
+            Self::Sprite(s) => sprite_pixel(s, lookups, x, y),
             Self::Surface(s) => s
                 .key(x, y)
-                .map(|k| lookup.get(k))
+                .map(|k| lookups[0].get(k))
                 .unwrap_or(Color::TRANSPARENT),
             Self::Tilemap(m, t) => m
                 .tile(x / t.tile_width, y / t.tile_height)
                 .and_then(|i| i.checked_sub(1))
                 .and_then(|i| t.tiles.get(i as usize))
-                .map(|s| sprite_pixel(s, lookup, x % t.tile_width, y % t.tile_height))
+                .map(|s| sprite_pixel(s, lookups, x % t.tile_width, y % t.tile_height))
                 .unwrap_or(Color::TRANSPARENT),
         }
     }
 }
-fn sprite_pixel(s: &Sprite, lookup: &crate::sprite::ColorLookup<'_>, x: u32, y: u32) -> Color {
+/// A sprite's pixel, with one lookup per layer, or one lookup for every layer.
+fn sprite_pixel(s: &Sprite, lookups: &[crate::sprite::ColorLookup<'_>], x: u32, y: u32) -> Color {
     let i = y as usize * s.width as usize + x as usize;
-    s.layers
-        .iter()
-        .fold(Color::TRANSPARENT, |c, l| lookup.get(l.keys[i]).over(c))
+    s.layers.iter().enumerate().fold(Color::TRANSPARENT, |c, (n, l)| {
+        lookups[if lookups.len() == 1 { 0 } else { n }]
+            .get(l.keys[i])
+            .over(c)
+    })
 }
 impl BackgroundPlacement {
     pub(crate) fn view<'a>(&'a self, doc: &'a Document) -> Result<SourceView<'a>> {

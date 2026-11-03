@@ -166,6 +166,7 @@ impl Sprite {
                 text: false,
                 name: Some("shadow".into()),
                 keys,
+                palette: None,
             },
         );
         Ok(sprite)

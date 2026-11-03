@@ -221,9 +221,9 @@ fn direct_uses(document: &Document) -> HashMap<&str, HashSet<char>> {
         .flat_map(|l| &l.items)
         .filter_map(|p| p.sprite.as_ref())
     {
-        uses.entry(source.palette.name())
-            .or_default()
-            .extend(source.keys());
+        for (palette, key) in source.palette_keys() {
+            uses.entry(palette).or_default().insert(key);
+        }
     }
     let tiles = document.tilesets.iter().flat_map(|t| &t.tiles);
     for sprite in document
@@ -232,9 +232,9 @@ fn direct_uses(document: &Document) -> HashMap<&str, HashSet<char>> {
         .chain(&document.frame_sprites)
         .chain(tiles)
     {
-        uses.entry(&sprite.palette.name)
-            .or_default()
-            .extend(sprite.keys());
+        for (palette, key) in sprite.palette_keys() {
+            uses.entry(palette).or_default().insert(key);
+        }
     }
     for (palette, key) in &document.sources.palette_uses {
         uses.entry(palette).or_default().insert(*key);
@@ -288,8 +288,8 @@ fn used_keys<'d>(document: &'d Document, index: &Index<'d>) -> HashSet<(&'d str,
         .chain(&document.frame_sprites)
         .chain(tiles)
     {
-        for key in sprite.keys() {
-            mark(&sprite.palette.name, key);
+        for (palette, key) in sprite.palette_keys() {
+            mark(palette, key);
         }
     }
     for (palette, key) in &sources.palette_uses {

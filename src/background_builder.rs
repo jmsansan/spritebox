@@ -252,17 +252,23 @@ impl Document {
                 p.crop(p.view(self)?.size()?)?;
                 if let Some(s) = &p.sprite {
                     s.effect_size(s.width, s.height, s.layers.len(), limits)?;
-                    let palette = self.palette(s.palette.name()).ok_or_else(|| {
-                        Error::new(
-                            ErrorCode::UnknownName,
-                            "Background sprite palette is absent from receiver",
-                        )
-                    })?;
-                    if let Some(key) = s.missing_key(palette) {
-                        return Err(Error::new(
-                            ErrorCode::UnknownName,
-                            format!("Background key `{key}` is absent from receiver palette"),
-                        ));
+                    for p in std::iter::once(s.palette()).chain(s.layer_palettes()) {
+                        let palette = self.palette(p.name()).ok_or_else(|| {
+                            Error::new(
+                                ErrorCode::UnknownName,
+                                "Background sprite palette is absent from receiver",
+                            )
+                        })?;
+                        for (owner, key) in s.palette_keys() {
+                            if owner == p.name() && palette.color(key).is_none() {
+                                return Err(Error::new(
+                                    ErrorCode::UnknownName,
+                                    format!(
+                                        "Background key `{key}` is absent from receiver palette"
+                                    ),
+                                ));
+                            }
+                        }
                     }
                 }
             }

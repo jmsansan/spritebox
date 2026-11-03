@@ -250,6 +250,7 @@ impl<'a> Parser<'a, '_> {
                     text: false,
                     name: None,
                     keys: pixels,
+                    palette: None,
                 }],
                 slice: None,
             },
