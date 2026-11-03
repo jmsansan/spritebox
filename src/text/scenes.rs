@@ -22,7 +22,8 @@ struct SurfaceOp<'a> {
     stop_keys: Vec<Token<'a>>,
 }
 enum Operation {
-    Paint(Primitive, char),
+    /// A primitive, its key, and its stroke width when only its edge is drawn.
+    Paint(Primitive, char, Option<u32>),
     Gradient(Gradient),
     Profile(ProfileOptions),
 }
@@ -299,7 +300,25 @@ impl<'a> Parser<'a, '_> {
                             op.error(ErrorCode::Syntax, "points= is only valid on polygons")
                         );
                     }
-                    Operation::Paint(p, k)
+                    let stroke = match o.get("stroke") {
+                        Some(t) if !matches!(ts[0].text, "rect" | "ellipse") => {
+                            return Err(t.error(
+                                ErrorCode::Syntax,
+                                "stroke= is only valid on rect and ellipse",
+                            ));
+                        }
+                        Some(t) => match integer::<u32>(t)? {
+                            0 => {
+                                return Err(t.error(
+                                    ErrorCode::InvalidArgument,
+                                    "Stroke width must be positive",
+                                ));
+                            }
+                            n => Some(n),
+                        },
+                        None => None,
+                    };
+                    Operation::Paint(p, k, stroke)
                 }
                 "gradient" => {
                     if key_token.is_some() || !points.is_empty() {
@@ -777,9 +796,9 @@ impl<'a> Parser<'a, '_> {
                             .map_err(|e| k.error(e.code, e.message))?;
                     }
                     let result = match &op.kind {
-                        Operation::Paint(p, k) => {
+                        Operation::Paint(p, k, stroke) => {
                             this.palette_uses.insert((s.palette.name.clone(), *k));
-                            s.paint(p, *k, this.limits, budget)
+                            s.paint(p, *k, *stroke, this.limits, budget)
                         }
                         Operation::Gradient(g) => {
                             for k in &op.stop_keys {

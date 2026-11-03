@@ -256,3 +256,110 @@ fn scale_rejects_other_factors_and_checks_limits() {
         ErrorCode::LimitExceeded
     );
 }
+
+// --- Stroked rectangles and ellipses (#58) ------------------------------------
+
+/// The keys of surface `name`, row by row, with `-` for EMPTY.
+fn surface_rows(doc: &Document, name: &str) -> Vec<String> {
+    let s = doc.surface(name).unwrap();
+    let (w, h) = s.size();
+    (0..h)
+        .map(|y| (0..w).map(|x| s.key(x, y).unwrap_or('-')).collect())
+        .collect()
+}
+
+#[test]
+fn strokes_are_the_shape_minus_the_shape_shrunk() {
+    for shape in ["rect", "ellipse"] {
+        for (w, h) in [(7, 5), (8, 6), (9, 9), (10, 4), (12, 12), (3, 8)] {
+            for n in [1u32, 2] {
+                let (x, y) = (1, 2);
+                let mut text = format!(
+                    "palette p\n  a #102030\n  b #ffffff\n\
+                     surface ring 14x14\n  rect base at=0,0 size=14x14 key=a\n  \
+                     {shape} edge at={x},{y} size={w}x{h} key=b stroke={n}\n\
+                     surface filled 14x14\n  rect base at=0,0 size=14x14 key=a\n  \
+                     {shape} outer at={x},{y} size={w}x{h} key=b\n"
+                );
+                if w > 2 * n && h > 2 * n {
+                    text += &format!(
+                        "  {shape} inner at={},{} size={}x{} key=a\n",
+                        x + n,
+                        y + n,
+                        w - 2 * n,
+                        h - 2 * n
+                    );
+                }
+                let doc = parse(&text);
+                assert_eq!(
+                    surface_rows(&doc, "ring"),
+                    surface_rows(&doc, "filled"),
+                    "{shape} {w}x{h} stroke={n}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn strokes_keep_what_is_inside_the_ring() {
+    let doc = parse(
+        "palette p\n  a #102030\n  b #ffffff\n  c #ff0000\n\
+         surface s 9x7\n  rect base at=0,0 size=9x7 key=a\n  rect mid at=3,2 size=3x3 key=c\n  \
+         rect frame at=0,0 size=9x7 key=b stroke=2\n",
+    );
+    assert_eq!(
+        surface_rows(&doc, "s"),
+        [
+            "bbbbbbbbb",
+            "bbbbbbbbb",
+            "bbacccabb",
+            "bbacccabb",
+            "bbacccabb",
+            "bbbbbbbbb",
+            "bbbbbbbbb",
+        ]
+    );
+    // A stroke at least half the shape's size fills it.
+    let full = parse(
+        "palette p\n  b #ffffff\nsurface s 4x3\n  rect r at=0,0 size=4x3 key=b stroke=2\n",
+    );
+    assert_eq!(surface_rows(&full, "s"), ["bbbb", "bbbb", "bbbb"]);
+}
+
+#[test]
+fn stroke_errors_and_the_builder() {
+    let base = "palette p\n  b #ffffff\nsurface s 8x8\n";
+    let found = errors(&format!("{base}  line l from=0,0 to=7,7 key=b stroke=1\n"));
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!((found[0].0, found[0].1, found[0].2), (4, 39, ErrorCode::Syntax));
+    let found = errors(&format!("{base}  rect r at=0,0 size=4x4 key=b stroke=0\n"));
+    assert_eq!((found[0].0, found[0].1, found[0].2), (4, 39, ErrorCode::InvalidArgument));
+    let found = errors(&format!("{base}  ellipse e at=0,0 size=4x4 key=b stroke=x\n"));
+    assert_eq!(found[0].2, ErrorCode::InvalidArgument);
+
+    let doc = parse(&format!("{base}  ellipse e at=1,1 size=6x6 key=b stroke=1\n"));
+    let palette = doc.palette("p").unwrap();
+    let mut builder =
+        spritebox::Surface::builder("s", 8, 8, palette, 0, &Limits::default()).unwrap();
+    let ellipse = spritebox::Primitive::Ellipse {
+        at: (1, 1),
+        size: (6, 6),
+    };
+    builder.stroke("e", &ellipse, 'b', 1).unwrap();
+    let built = builder.finish();
+    let parsed = doc.surface("s").unwrap();
+    for y in 0..8 {
+        for x in 0..8 {
+            assert_eq!(built.key(x, y), parsed.key(x, y));
+        }
+    }
+    let mut builder =
+        spritebox::Surface::builder("s", 8, 8, palette, 0, &Limits::default()).unwrap();
+    let line = spritebox::Primitive::Line {
+        from: (0, 0),
+        to: (3, 3),
+    };
+    assert!(builder.stroke("l", &line, 'b', 1).is_err());
+    assert!(builder.stroke("e", &ellipse, 'b', 0).is_err());
+}

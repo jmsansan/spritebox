@@ -183,14 +183,28 @@ impl Surface {
             Arc::make_mut(&mut self.keys)[y as usize * self.width as usize + x as usize] = key;
         }
     }
+    /// Paints `primitive`. With `stroke`, a rectangle or an ellipse paints only the
+    /// band of that many pixels inside its edge: the filled shape minus the same
+    /// shape shrunk by `stroke` on every side, so the two meet exactly.
     pub(crate) fn paint(
         &mut self,
         primitive: &Primitive,
         key: char,
+        stroke: Option<u32>,
         limits: &Limits,
         b: &mut Budget,
     ) -> Result<()> {
         self.check_key(key)?;
+        if let Some(n) = stroke {
+            if n == 0 {
+                return Err(Error::invalid("Stroke width must be positive"));
+            }
+            if !matches!(primitive, Primitive::Rect { .. } | Primitive::Ellipse { .. }) {
+                return Err(Error::invalid(
+                    "Only rectangles and ellipses can be stroked",
+                ));
+            }
+        }
         self.commands += 1 + if let Primitive::Polygon { points } = primitive {
             points.len()
         } else {
@@ -213,13 +227,28 @@ impl Surface {
                     at.1 as i64 + h as i64,
                 );
                 b.work((r - l) as u64 * (d - t) as u64)?;
+                let rect = matches!(primitive, Primitive::Rect { .. });
+                // Whether the pixel centred at offsets (dx, dy) from the centre, in half
+                // pixels, is inside the shape of size w × h.
+                let inside = |dx: i128, dy: i128, w: i128, h: i128| {
+                    if rect {
+                        dx.abs() < w && dy.abs() < h
+                    } else {
+                        dx * dx * h * h + dy * dy * w * w <= w * w * h * h
+                    }
+                };
+                // The shape shrunk by the stroke on every side, when it has pixels.
+                let inner = stroke.and_then(|n| {
+                    let shrink = 2 * n as u64;
+                    (w as u64 > shrink && h as u64 > shrink)
+                        .then(|| (w as i128 - shrink as i128, h as i128 - shrink as i128))
+                });
                 for y in t..d {
                     for x in l..r {
                         let dx = 2 * (x - at.0 as i64) as i128 + 1 - w as i128;
                         let dy = 2 * (y - at.1 as i64) as i128 + 1 - h as i128;
-                        if matches!(primitive, Primitive::Rect { .. })
-                            || dx * dx * h as i128 * h as i128 + dy * dy * w as i128 * w as i128
-                                <= w as i128 * w as i128 * h as i128 * h as i128
+                        if inside(dx, dy, w as i128, h as i128)
+                            && inner.is_none_or(|(iw, ih)| !inside(dx, dy, iw, ih))
                         {
                             self.put(x, y, key);
                         }
@@ -439,7 +468,22 @@ impl SurfaceBuilder {
             },
         )?;
         self.surface
-            .paint(primitive, key, &self.limits, &mut self.budget)?;
+            .paint(primitive, key, None, &self.limits, &mut self.budget)?;
+        Ok(self)
+    }
+    /// Paints only the band `width` pixels wide inside the edge of a rectangle or an
+    /// ellipse, keeping the keys inside the ring: the filled shape minus the same
+    /// shape shrunk by `width` on every side.
+    pub fn stroke(
+        &mut self,
+        name: &str,
+        primitive: &Primitive,
+        key: char,
+        width: u32,
+    ) -> Result<&mut Self> {
+        self.name(name, 0)?;
+        self.surface
+            .paint(primitive, key, Some(width), &self.limits, &mut self.budget)?;
         Ok(self)
     }
     pub fn gradient(&mut self, name: &str, gradient: &Gradient) -> Result<&mut Self> {

@@ -44,7 +44,7 @@ assert_eq!(export.backgrounds[0].layers[0].image.height(), 6);
 objects. `Surface::key` returns `None` for EMPTY or out-of-bounds cells;
 `Surface::profile(name).heights()` exposes original y boundaries.
 `Surface::builder` paints typed `Primitive`, `Gradient` and `ProfileOptions`
-operations within explicit limits. `Background::builder` adds named layers,
+operations within explicit limits, and strokes rectangles and ellipses. `Background::builder` adds named layers,
 `SourceRef` placements and weighted scatter groups using the same generator as
 text parsing. `finish` returns an immutable object. `Document::with_surface` and
 `with_background` insert validated objects into a new document; references must
@@ -105,6 +105,8 @@ surface buildings 128x96 palette=world seed=0
   line aerial from=24,10 to=24,31 key=k
   polygon roof key=r points=4,32 28,12 52,32
   ellipse moon at=84,8 size=24x24 key=m
+  ellipse range at=60,40 size=33x21 key=k stroke=1
+  rect frame at=0,0 size=128x96 key=k stroke=2
 ```
 
 All operations are named; names are unique within their owning surface.
@@ -124,6 +126,14 @@ signed area are required; repeated vertices, intersections and overlapping edges
 are errors. Reversing winding preserves coverage. Ellipses sample pixel centers
 inside a positive bounding box using exact wide integer arithmetic. None of these
 operations adds antialiasing or intermediate RGB values.
+
+`stroke=N` (N >= 1) on a `rect` or an `ellipse` paints only the band N pixels wide
+inside the shape's edge: exactly the pixels of the filled shape minus those of the
+same shape shrunk by N on every side (`at` + N, `size` - 2N), with the same
+coverage rules, so a filled shape and its stroke meet exactly. Keys inside the ring
+are kept. When the shape is no more than 2N wide or high, the shrunk shape is empty
+and the whole shape is painted. Lines and polygons have no `stroke=`. Rust has
+`SurfaceBuilder::stroke`.
 
 ## Key gradients
 
