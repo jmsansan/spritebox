@@ -45,6 +45,8 @@ enum ItemDef<'a> {
         source: Token<'a>,
         options: PlacementOptions,
         crop_token: Option<Token<'a>>,
+        /// `layer=` of a placed background.
+        layer: Option<Token<'a>>,
     },
     Scatter {
         name: Token<'a>,
@@ -572,10 +574,19 @@ impl<'a> Parser<'a, '_> {
                         if ts.len() < 3 {
                             return Err(ts[0].error(
                                 ErrorCode::Syntax,
-                                "Expected place sprite|surface|tilemap SOURCE at=X,Y",
+                                "Expected place sprite|surface|tilemap|background SOURCE at=X,Y",
                             ));
                         }
                         let mut o = Options::new(&ts[3..])?;
+                        let layer = if ts[1].text == "background" {
+                            let layer = o.get("layer");
+                            if let Some(t) = layer {
+                                check_name(t)?;
+                            }
+                            layer
+                        } else {
+                            None
+                        };
                         let at = pair(o.need("at", ts[0])?)?;
                         let anchor = match o.get("anchor") {
                             None => Anchor::TopLeft,
@@ -599,6 +610,7 @@ impl<'a> Parser<'a, '_> {
                             source: ts[2],
                             options: PlacementOptions { at, anchor, crop },
                             crop_token,
+                            layer,
                         });
                     }
                     "scatter" => {
@@ -832,12 +844,32 @@ impl<'a> Parser<'a, '_> {
         let backgrounds = std::mem::take(&mut self.backgrounds);
         let mut names = HashSet::new();
         let mut cache = HashMap::new();
-        for def in &backgrounds {
-            let mut build = |this: &mut Self, budget: &mut Budget| -> Parsed<Background> {
+        let (order, mut depths) = self.background_order(&backgrounds);
+        // Backgrounds are built after those they place, then kept in written order.
+        let mut built: Vec<usize> = Vec::new();
+        for &index in &order {
+            let def = &backgrounds[index];
+            let mut build = |this: &mut Self, budget: &mut Budget| -> Parsed<Option<Background>> {
                 if !names.insert(def.name.text) {
                     return Err(def
                         .name
                         .error(ErrorCode::DuplicateName, "Duplicate background"));
+                }
+                // A background placed here failed, or is in a circle: both reported.
+                let placed = def.layers.iter().flat_map(|l| &l.items).filter_map(|i| match i {
+                    ItemDef::Place { kind, source, .. } if kind.text == "background" => {
+                        Some(source.text)
+                    }
+                    _ => None,
+                });
+                for name in placed {
+                    let defined = backgrounds.iter().any(|b| b.name.text == name);
+                    if defined && doc.background(name).is_none() {
+                        return Ok(None);
+                    }
+                }
+                if depths[index].is_none() {
+                    return Ok(None);
                 }
                 let mut bg = Background {
                     commands: def.layers.len()
@@ -872,6 +904,7 @@ impl<'a> Parser<'a, '_> {
                                 source,
                                 options,
                                 crop_token,
+                                layer: placed_layer,
                             } => {
                                 let (source_ref, sprite) = match kind.text {
                                     "sprite" => {
@@ -885,10 +918,44 @@ impl<'a> Parser<'a, '_> {
                                         check_name(*source)?;
                                         (SourceRef::Tilemap(source.text.into()), None)
                                     }
+                                    "background" => {
+                                        check_name(*source)?;
+                                        let placed = doc.background(source.text).ok_or_else(|| {
+                                            source.error(
+                                                ErrorCode::UnknownName,
+                                                format!("Unknown background `{}`", source.text),
+                                            )
+                                        })?;
+                                        if let Some(t) = placed_layer {
+                                            if !placed.layers().iter().any(|l| l.name() == t.text) {
+                                                let names: Vec<String> = placed
+                                                    .layers()
+                                                    .iter()
+                                                    .map(|l| format!("`{}`", l.name()))
+                                                    .collect();
+                                                return Err(t.error(
+                                                    ErrorCode::UnknownName,
+                                                    format!(
+                                                        "Background `{}` has no layer `{}`; its layers are {}",
+                                                        source.text,
+                                                        t.text,
+                                                        names.join(", ")
+                                                    ),
+                                                ));
+                                            }
+                                        }
+                                        (
+                                            SourceRef::Background {
+                                                name: source.text.into(),
+                                                layer: placed_layer.map(|t| t.text.into()),
+                                            },
+                                            None,
+                                        )
+                                    }
                                     _ => {
                                         return Err(kind.error(
                                             ErrorCode::Syntax,
-                                            "Expected sprite|surface|tilemap",
+                                            "Expected sprite|surface|tilemap|background",
                                         ));
                                     }
                                 };
@@ -1003,14 +1070,128 @@ impl<'a> Parser<'a, '_> {
                     }
                     bg.layers.push(layer);
                 }
-                Ok(bg)
+                Ok(Some(bg))
             };
             match build(self, &mut budget) {
-                Ok(b) => doc.backgrounds.push(b),
-                Err(e) => self.errors.push(e),
+                Ok(Some(b)) => {
+                    doc.backgrounds.push(b);
+                    built.push(index);
+                }
+                Ok(None) => depths[index] = None,
+                Err(e) => {
+                    depths[index] = None;
+                    self.errors.push(e);
+                }
             }
         }
+        let mut ordered: Vec<(usize, Background)> =
+            built.into_iter().zip(std::mem::take(&mut doc.backgrounds)).collect();
+        ordered.sort_by_key(|(index, _)| *index);
+        doc.backgrounds = ordered.into_iter().map(|(_, b)| b).collect();
         self.backgrounds = backgrounds;
         self.scene_budget = budget;
+    }
+
+    /// The order to build backgrounds in, each after those it places, and how deep
+    /// each one's placed backgrounds go: `None` for one in a circle, or too deep,
+    /// which is reported.
+    fn background_order(&mut self, defs: &[BackgroundDef<'a>]) -> (Vec<usize>, Vec<Option<usize>>) {
+        let mut index: HashMap<&str, usize> = HashMap::new();
+        for (i, def) in defs.iter().enumerate() {
+            index.entry(def.name.text).or_insert(i);
+        }
+        let placed = |i: usize| -> Vec<Token<'a>> {
+            defs[i]
+                .layers
+                .iter()
+                .flat_map(|l| &l.items)
+                .filter_map(|item| match item {
+                    ItemDef::Place { kind, source, .. } if kind.text == "background" => {
+                        Some(*source)
+                    }
+                    _ => None,
+                })
+                .collect()
+        };
+        #[derive(Clone, Copy, PartialEq)]
+        enum Visit {
+            New,
+            Open,
+            Done,
+        }
+        let mut visit = vec![Visit::New; defs.len()];
+        let mut depth: Vec<Option<usize>> = vec![Some(0); defs.len()];
+        let mut order = Vec::new();
+        let mut path: Vec<usize> = Vec::new();
+        for root in 0..defs.len() {
+            let mut stack = vec![(root, false)];
+            while let Some((i, expanded)) = stack.pop() {
+                if expanded {
+                    path.pop();
+                    visit[i] = Visit::Done;
+                    order.push(i);
+                    if depth[i].is_none() {
+                        continue;
+                    }
+                    for token in placed(i) {
+                        let Some(&j) = index.get(token.text) else {
+                            continue;
+                        };
+                        match depth[j].map(|d| d + 1) {
+                            Some(d) if d > self.limits.max_nesting => {
+                                self.errors.push(token.error(
+                                    ErrorCode::LimitExceeded,
+                                    format!(
+                                        "Backgrounds placed in backgrounds more than the limit of {} deep",
+                                        self.limits.max_nesting
+                                    ),
+                                ));
+                                depth[i] = None;
+                                break;
+                            }
+                            Some(d) => depth[i] = depth[i].map(|own| own.max(d)),
+                            None => {
+                                depth[i] = None;
+                                break;
+                            }
+                        }
+                    }
+                    continue;
+                }
+                if visit[i] != Visit::New {
+                    continue;
+                }
+                visit[i] = Visit::Open;
+                path.push(i);
+                stack.push((i, true));
+                for token in placed(i) {
+                    let Some(&j) = index.get(token.text) else {
+                        continue;
+                    };
+                    match visit[j] {
+                        Visit::New => stack.push((j, false)),
+                        Visit::Open => {
+                            let start = path.iter().position(|&p| p == j).unwrap_or(0);
+                            let mut names: Vec<&str> =
+                                path[start..].iter().map(|&p| defs[p].name.text).collect();
+                            names.push(defs[j].name.text);
+                            self.errors.push(token.error(
+                                ErrorCode::Cycle,
+                                format!(
+                                    "Background `{}` is placed in itself: {}",
+                                    defs[j].name.text,
+                                    names.join(" -> ")
+                                ),
+                            ));
+                            for &p in &path[start..] {
+                                depth[p] = None;
+                            }
+                        }
+                        Visit::Done => {}
+                    }
+                }
+            }
+        }
+        (order, depth)
     }
 }

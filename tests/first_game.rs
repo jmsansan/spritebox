@@ -560,3 +560,282 @@ fn tile_references_follow_sprite_rules() {
     assert_eq!(found.len(), 1, "{found:?}");
     assert_eq!((found[0].0, found[0].1), (24, 12));
 }
+
+// --- A background inside another (#59) ------------------------------------------
+
+const BOARD: &str = "\
+palette world
+  .  transparent
+  d  #203020
+  g  #40a040
+  w  #ffffff80
+  k  #000000
+sprite tower 3x4 palette=world
+  .k.
+  kwk
+  kgk
+  kkk
+surface ground 256x256 palette=world
+  rect soil at=0,0 size=256x256 key=d
+  ellipse lawn at=20,30 size=200x150 key=g
+  rect fog at=100,0 size=50x256 key=w
+";
+
+/// The board's placements, at `X`,`Y`, for a layer.
+fn board_items(x: i32, y: i32) -> String {
+    format!(
+        "    place surface ground at={x},{y}\n\
+         \x20   place sprite tower at={},{}\n\
+         \x20   place sprite tower:flip_x at={},{} anchor=center\n",
+        x + 10,
+        y + 20,
+        x + 128,
+        y + 128
+    )
+}
+
+#[test]
+fn a_placed_background_equals_a_copy_of_its_placements() {
+    let text = format!(
+        "{BOARD}\
+background board 256x256
+  layer map 256x256
+{}background play 600x270
+  layer board 600x270
+    place background board at=172,7
+  layer hud 600x270
+    place sprite tower at=4,4
+background shop 600x270
+  layer board 600x270
+    place background board at=-40,-20
+background play_copy 600x270
+  layer board 600x270
+{}  layer hud 600x270
+    place sprite tower at=4,4
+background shop_copy 600x270
+  layer board 600x270
+{}",
+        board_items(0, 0),
+        board_items(172, 7),
+        board_items(-40, -20)
+    );
+    let doc = parse(&text);
+    let render = |name: &str| {
+        doc.background(name)
+            .unwrap()
+            .render(&doc, &BackgroundRenderOptions::default())
+            .unwrap()
+    };
+    assert_eq!(render("play"), render("play_copy"));
+    assert_eq!(render("shop"), render("shop_copy"));
+    let placed = &doc.background("play").unwrap().layers()[0].placements()[0];
+    assert_eq!(
+        placed.source(),
+        &spritebox::SourceRef::Background {
+            name: "board".into(),
+            layer: None
+        }
+    );
+    // Exports keep the written order of backgrounds.
+    let export = doc.export(&Default::default()).unwrap();
+    let names: Vec<&str> = export.backgrounds.iter().map(|b| b.name.as_str()).collect();
+    assert_eq!(names, ["board", "play", "shop", "play_copy", "shop_copy"]);
+    assert_eq!(
+        export.backgrounds[1].flat.as_ref().unwrap().image,
+        export.backgrounds[3].flat.as_ref().unwrap().image
+    );
+}
+
+#[test]
+fn placed_backgrounds_crop_name_a_layer_and_follow_themes() {
+    let text = format!(
+        "{BOARD}\
+theme dusk of world
+  g #a04040
+background mockup 64x48
+  layer view 64x48
+    place background board layer=map at=0,0 crop=60,40,40,30 anchor=bottom-left
+    place background board layer=units at=60,40 anchor=center
+background board 256x256
+  layer map 256x256 at=2,0
+    place surface ground at=0,0
+  layer units 256x256
+    place sprite tower at=0,0
+"
+    );
+    let doc = parse(&text);
+    let board = doc.background("board").unwrap();
+    let only_layer = |doc: &Document, layer: usize| {
+        let mut builder =
+            spritebox::Background::builder(doc, "one", (256, 256), 0, &Limits::default()).unwrap();
+        let source = &board.layers()[layer];
+        builder
+            .layer("l", source.size(), source.options().clone())
+            .unwrap();
+        for p in source.placements() {
+            builder.place(p.source().clone(), p.options()).unwrap();
+        }
+        builder.finish().render(doc, &Default::default()).unwrap()
+    };
+    let check = |doc: &Document| {
+        let map = only_layer(doc, 0);
+        let units = only_layer(doc, 1);
+        let mockup = doc
+            .background("mockup")
+            .unwrap()
+            .render(doc, &Default::default())
+            .unwrap();
+        for y in 0..48u32 {
+            for x in 0..64u32 {
+                // The crop's bottom-left corner is at 0,0, so it is above the view.
+                let mut want = spritebox::Color::TRANSPARENT;
+                let (ux, uy) = (x as i64 - 60 + 128, y as i64 - 40 + 128);
+                if (0..256).contains(&ux) && (0..256).contains(&uy) {
+                    want = units.pixel(ux as u32, uy as u32).unwrap().over(want);
+                }
+                assert_eq!(mockup.pixel(x, y), Some(want), "{x},{y}");
+            }
+        }
+    };
+    check(&doc);
+    // The cropped map, placed at the top-left instead.
+    let top = parse(&text.replace("anchor=bottom-left", "anchor=top-left"));
+    let map = only_layer(&top, 0);
+    let mockup = top
+        .background("mockup")
+        .unwrap()
+        .render(&top, &Default::default())
+        .unwrap();
+    assert_eq!(mockup.pixel(0, 0), map.pixel(60, 40));
+    assert_eq!(mockup.pixel(39, 29), map.pixel(99, 69));
+    assert_eq!(mockup.pixel(40, 0), Some(spritebox::Color::TRANSPARENT));
+    // Themes recolor the placed background.
+    let dusk = top.with_theme("dusk").unwrap();
+    let themed = dusk
+        .background("mockup")
+        .unwrap()
+        .render(&dusk, &Default::default())
+        .unwrap();
+    assert_eq!(themed.pixel(20, 10), Some(Color::rgb(0xa0, 0x40, 0x40)));
+    assert_eq!(mockup.pixel(20, 10), Some(Color::rgb(0x40, 0xa0, 0x40)));
+}
+
+#[test]
+fn placed_background_errors_are_positioned() {
+    let cycle = format!(
+        "{BOARD}\
+background a 8x8
+  layer l 8x8
+    place background b at=0,0
+background b 8x8
+  layer l 8x8
+    place background c at=0,0
+background c 8x8
+  layer l 8x8
+    place background a at=0,0
+background d 8x8
+  layer l 8x8
+    place background a at=0,0
+"
+    );
+    let found = errors(&cycle);
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].2, ErrorCode::Cycle);
+    assert!(found[0].3.contains("a -> b -> c -> a"), "{}", found[0].3);
+    assert_eq!((found[0].0, found[0].1), (24, 22));
+    let me = format!("{BOARD}background a 8x8\n  layer l 8x8\n    place background a at=0,0\n");
+    let found = errors(&me);
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!(found[0].3.contains("a -> a"), "{}", found[0].3);
+    let cases = [
+        ("place background nope at=0,0", ErrorCode::UnknownName, 22, "Unknown background `nope`"),
+        ("place background a layer=sky at=0,0", ErrorCode::UnknownName, 30, "its layers are `l`"),
+        ("place background a at=0,0 crop=0,0,9,9", ErrorCode::InvalidArgument, 36, "Crop"),
+        ("place surface ground layer=l at=0,0", ErrorCode::Syntax, 32, "Unknown scene option"),
+    ];
+    for (line, code, column, message) in cases {
+        let text = format!(
+            "{BOARD}background a 8x8\n  layer l 8x8\n    place sprite tower at=0,0\n\
+             background b 8x8\n  layer l 8x8\n    {line}\n"
+        );
+        let found = errors(&text);
+        assert_eq!(found.len(), 1, "{line}: {found:?}");
+        assert_eq!((found[0].0, found[0].1, found[0].2), (21, column, code), "{line}");
+        assert!(found[0].3.contains(message), "{line}: {}", found[0].3);
+    }
+    // Nesting deeper than the limit.
+    let limits = Limits {
+        max_nesting: 2,
+        ..Limits::default()
+    };
+    let mut deep = String::from(BOARD);
+    deep += "background n0 8x8\n  layer l 8x8\n    place sprite tower at=0,0\n";
+    for i in 1..=3 {
+        deep += &format!(
+            "background n{i} 8x8\n  layer l 8x8\n    place background n{} at=0,0\n",
+            i - 1
+        );
+    }
+    let found = check(&deep, &limits);
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].code, ErrorCode::LimitExceeded);
+    assert_eq!(found[0].position.unwrap().line, 27);
+}
+
+#[test]
+fn placed_backgrounds_share_the_scene_budget() {
+    let text = format!(
+        "{BOARD}\
+background board 256x256
+  layer map 256x256
+    place surface ground at=0,0
+background mockup 256x256
+  layer view 256x256
+    place background board at=0,0
+"
+    );
+    let doc = parse(&text);
+    let board = doc.background("board").unwrap();
+    let mockup = doc.background("mockup").unwrap();
+    // Rendering the board alone fits a budget that the mockup, which draws the board
+    // as well as its own layer, exceeds.
+    let mut limits = Limits::default();
+    limits.max_scene_work = 1;
+    while board.render_with(&doc, &Default::default(), &limits).is_err() {
+        limits.max_scene_work *= 2;
+    }
+    let error = mockup
+        .render_with(&doc, &Default::default(), &limits)
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::LimitExceeded);
+    // The typed builder places a background as well.
+    let mut builder =
+        spritebox::Background::builder(&doc, "copy", (256, 256), 0, &Limits::default()).unwrap();
+    builder
+        .layer("view", (256, 256), Default::default())
+        .unwrap()
+        .place(
+            spritebox::SourceRef::Background {
+                name: "board".into(),
+                layer: Some("map".into()),
+            },
+            Default::default(),
+        )
+        .unwrap();
+    let copy = builder.finish();
+    assert_eq!(
+        copy.render(&doc, &Default::default()).unwrap(),
+        mockup.render(&doc, &Default::default()).unwrap()
+    );
+    let mut builder =
+        spritebox::Background::builder(&doc, "bad", (8, 8), 0, &Limits::default()).unwrap();
+    builder.layer("view", (8, 8), Default::default()).unwrap();
+    let missing = builder.place(
+        spritebox::SourceRef::Background {
+            name: "board".into(),
+            layer: Some("nope".into()),
+        },
+        Default::default(),
+    );
+    assert_eq!(missing.err().unwrap().code, ErrorCode::UnknownName);
+}

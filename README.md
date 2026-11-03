@@ -739,8 +739,9 @@ imported filenames, and accept ordinary lint suppression.
 
 Describe finite static scenes with palette-key surfaces and ordered native layers.
 Paint rectangles, lines, polygons, ellipses, banded/Bayer gradients and reusable
-noise profiles. Place sprites, textures and cropped tilemaps, or scatter weighted
-sprite variants along a terrain profile. Themes recolor retained keys without
+noise profiles, and stroke rectangles and ellipses. Place sprites, textures, tiles,
+cropped tilemaps and other backgrounds, or scatter weighted sprite variants along a
+terrain profile. Themes recolor retained keys without
 moving generated geometry or placements.
 
 ![Background generated from text](docs/backgrounds.png)

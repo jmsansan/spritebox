@@ -77,6 +77,12 @@ pub enum SourceRef {
     Sprite(String),
     Surface(String),
     Tilemap(String),
+    /// Another background, drawn as its flat image at camera 0,0, or only the layer
+    /// named, as that layer appears in the flat image. Its size is the background's.
+    Background {
+        name: String,
+        layer: Option<String>,
+    },
 }
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct BackgroundRenderOptions {
@@ -159,12 +165,25 @@ impl BackgroundLayer {
             axis(v, self.height, self.options.repeat.y())?,
         ))
     }
-    pub(crate) fn native(&self, doc: &Document, limits: &Limits, b: &mut Budget) -> Result<Image> {
+    pub(crate) fn native(
+        &self,
+        doc: &Document,
+        limits: &Limits,
+        b: &mut Budget,
+        depth: usize,
+    ) -> Result<Image> {
         limits.check_image(self.width, self.height)?;
         b.pixels(self.width as u64 * self.height as u64)?;
         let mut image = Image::new_with(self.width, self.height, limits)?;
         for item in &self.items {
             let source = item.view(doc)?;
+            // A placed background is drawn first, within the same budget.
+            let placed = match &source {
+                SourceView::Background(bg, layer) => {
+                    Some(bg.placed_image(doc, *layer, limits, b, depth + 1)?)
+                }
+                _ => None,
+            };
             let lookups = source.lookups(doc);
             let crop = item.crop(source.size()?)?;
             let (x, y) = item.top_left(crop);
@@ -183,8 +202,11 @@ impl BackgroundLayer {
             )?;
             for py in t..d {
                 for px in l..r {
-                    let color =
-                        source.pixel(&lookups, crop.x + (px - x) as u32, crop.y + (py - y) as u32);
+                    let (sx, sy) = (crop.x + (px - x) as u32, crop.y + (py - y) as u32);
+                    let color = match &placed {
+                        Some(placed) => placed.pixel(sx, sy).unwrap(),
+                        None => source.pixel(&lookups, sx, sy),
+                    };
                     let below = image.pixel(px as u32, py as u32).unwrap();
                     image.set_pixel(px as u32, py as u32, color.over(below));
                 }
@@ -251,13 +273,63 @@ impl Background {
         limits: &Limits,
         b: &mut Budget,
     ) -> Result<Vec<Image>> {
+        self.native_layers_at(doc, limits, b, 0)
+    }
+    /// The native layers of a background placed `depth` backgrounds deep.
+    fn native_layers_at(
+        &self,
+        doc: &Document,
+        limits: &Limits,
+        b: &mut Budget,
+        depth: usize,
+    ) -> Result<Vec<Image>> {
         if self.layers.len() > limits.max_layers {
             return Err(Error::limit("Too many background layers"));
         }
+        if depth > limits.max_nesting {
+            return Err(Error::limit(format!(
+                "Backgrounds placed in backgrounds more than the limit of {} deep",
+                limits.max_nesting
+            )));
+        }
         self.layers
             .iter()
-            .map(|l| l.native(doc, limits, b))
+            .map(|l| l.native(doc, limits, b, depth))
             .collect()
+    }
+    /// The image of this background placed in another, `depth` deep: its flat image
+    /// at camera 0,0, or only layer `layer` as it appears in that image.
+    fn placed_image(
+        &self,
+        doc: &Document,
+        layer: Option<usize>,
+        limits: &Limits,
+        b: &mut Budget,
+        depth: usize,
+    ) -> Result<Image> {
+        let options = BackgroundRenderOptions::default();
+        match layer {
+            None => {
+                let layers = self.native_layers_at(doc, limits, b, depth)?;
+                self.flatten(&layers, &options, limits, b)
+            }
+            Some(i) => {
+                if depth > limits.max_nesting {
+                    return Err(Error::limit(format!(
+                        "Backgrounds placed in backgrounds more than the limit of {} deep",
+                        limits.max_nesting
+                    )));
+                }
+                let native = self.layers[i].native(doc, limits, b, depth)?;
+                self.compose(
+                    std::iter::once((&self.layers[i], &native)),
+                    1,
+                    &options,
+                    limits,
+                    b,
+                )
+            }
+        }
     }
     pub(crate) fn storage(&self, sprites: &mut std::collections::HashSet<*const Sprite>) -> u64 {
         self.layers
@@ -280,14 +352,31 @@ impl Background {
         limits: &Limits,
         b: &mut Budget,
     ) -> Result<Image> {
+        self.compose(
+            self.layers.iter().zip(layers),
+            self.layers.len(),
+            options,
+            limits,
+            b,
+        )
+    }
+    /// The viewport of `count` layers, each with its native image, in order.
+    fn compose<'l>(
+        &self,
+        layers: impl Iterator<Item = (&'l BackgroundLayer, &'l Image)>,
+        count: usize,
+        options: &BackgroundRenderOptions,
+        limits: &Limits,
+        b: &mut Budget,
+    ) -> Result<Image> {
         b.pixels(self.width as u64 * self.height as u64)?;
         let mut image = Image::new_with(self.width, self.height, limits)?;
         b.work(
             (self.width as u64 * self.height as u64)
-                .checked_mul(self.layers.len() as u64)
+                .checked_mul(count as u64)
                 .ok_or_else(|| Error::limit("View work overflow"))?,
         )?;
-        for (layer, native) in self.layers.iter().zip(layers) {
+        for (layer, native) in layers {
             for y in 0..self.height {
                 for x in 0..self.width {
                     if let Some((u, v)) = layer.sample(x, y, options.camera) {
@@ -346,10 +435,13 @@ pub(crate) enum SourceView<'a> {
     Sprite(&'a Sprite),
     Surface(&'a Surface),
     Tilemap(&'a Tilemap, &'a Tileset),
+    /// A background, and the index of its one layer drawn, if not all.
+    Background(&'a Background, Option<usize>),
 }
 impl SourceView<'_> {
     pub fn size(&self) -> Result<(u32, u32)> {
         match self {
+            Self::Background(bg, _) => Ok(bg.size()),
             Self::Sprite(s) => Ok((s.width, s.height)),
             Self::Surface(s) => Ok(s.size()),
             Self::Tilemap(m, t) => Ok((
@@ -364,6 +456,7 @@ impl SourceView<'_> {
     }
     fn cost(&self) -> u64 {
         match self {
+            Self::Background(..) => 1,
             Self::Sprite(s) => s.layers.len() as u64,
             Self::Surface(_) => 1,
             Self::Tilemap(_, t) => t
@@ -384,10 +477,13 @@ impl SourceView<'_> {
             Self::Sprite(s) => s.layer_palettes().map(current).collect(),
             Self::Surface(s) => vec![current(&s.palette)],
             Self::Tilemap(_, t) => vec![current(&t.palette)],
+            Self::Background(..) => Vec::new(),
         }
     }
     fn pixel(&self, lookups: &[crate::sprite::ColorLookup<'_>], x: u32, y: u32) -> Color {
         match self {
+            // Drawn from the placed image instead.
+            Self::Background(..) => Color::TRANSPARENT,
             Self::Sprite(s) => sprite_pixel(s, lookups, x, y),
             Self::Surface(s) => s
                 .key(x, y)
@@ -429,6 +525,24 @@ impl BackgroundPlacement {
                 let m = doc.tilemap(name).ok_or_else(missing)?;
                 let t = doc.tileset(m.tileset()).ok_or_else(missing)?;
                 Ok(SourceView::Tilemap(m, t))
+            }
+            SourceRef::Background { name, layer } => {
+                let bg = doc.background(name).ok_or_else(missing)?;
+                let layer = match layer {
+                    None => None,
+                    Some(layer) => Some(
+                        bg.layers
+                            .iter()
+                            .position(|l| &l.name == layer)
+                            .ok_or_else(|| {
+                                Error::new(
+                                    ErrorCode::UnknownName,
+                                    format!("Background `{name}` has no layer `{layer}`"),
+                                )
+                            })?,
+                    ),
+                };
+                Ok(SourceView::Background(bg, layer))
             }
         }
     }

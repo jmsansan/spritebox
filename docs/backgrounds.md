@@ -67,14 +67,46 @@ canvas and repeat period. Sizes must be positive. Positions are signed i32,
 with +x right and +y down. Native layer dimensions fit signed coordinates.
 `at` defaults to `0,0` on layers and is required on ordinary placements.
 Names use ASCII letters, digits, `_` and `-`; surface/background namespaces are
-distinct. Forward and imported references work. Nested backgrounds/screens do
-not belong in a background. Core APIs perform no filesystem I/O.
+distinct. Forward and imported references work. Screens do not belong in a
+background; another background does, as below. Core APIs perform no filesystem I/O.
 
 `crop=x,y,w,h` is a positive in-bounds source rectangle. Crop is applied first,
 then the anchor: `top-left` subtracts nothing, `bottom-left` subtracts the cropped
 height, and `center` subtracts floor(width/2), floor(height/2). Placements clip to
 the native layer. The optional in-bounds layer `clip` is baked after composing
 items. All rectangle bounds are half-open.
+
+## Backgrounds inside backgrounds
+
+```text
+background board 256x256
+  layer ground 256x256
+    place surface grass at=0,0
+  layer units 256x256
+    place sprite tower at=40,60
+background shop 600x270
+  layer board 600x270
+    place background board at=172,7
+  layer hud 600x270
+    place background board layer=units at=8,8 crop=0,0,128,128
+```
+
+`place background NAME [layer=LAYER] at=X,Y [crop=...] [anchor=...]` draws another
+background into a layer. Without `layer=`, the source is the placed background's
+flat image at camera 0,0; with it, only that layer, as it appears in that flat
+image (its origin, repeat and clip applied, at camera 0,0). Either way the source
+has the placed background's size, which `crop` and `anchor` refer to. The placed
+background is drawn as an image, with the usual source-over, so pixels equal a copy
+of its placements in a layer with nothing under them. It is never moved by the
+outer camera's parallax inside the outer layer.
+
+Placed backgrounds may be defined later in the file or imported. A circle, such as
+`a` placing `b` placing `a`, is an error at the placement that closes it, naming the
+chain `a -> b -> a`; so is nesting deeper than `Limits::max_nesting`. An unknown
+layer is an error that lists the background's layers. Rendering a placed background
+spends the storage and work budget of the background that places it, every time it
+is placed. Themes recolor placed backgrounds too. Exports keep backgrounds in
+written order. In Rust, place `SourceRef::Background { name, layer }`.
 
 Items draw in source order onto transparent straight RGBA8 native layers. Then
 layers draw in source order over the transparent viewport using `Color::over`.
