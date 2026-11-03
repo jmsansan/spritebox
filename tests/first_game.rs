@@ -150,3 +150,109 @@ fn mixed_sprites_are_not_tiles() {
     assert_eq!((found[0].0, found[0].1), (22, 12));
     assert!(found[0].3.contains("mixes palettes"), "{}", found[0].3);
 }
+
+// --- scale(n) (#57) -----------------------------------------------------------
+
+const ICONS: &str = "\
+palette ui
+  .  transparent
+  k  #000000
+  w  #ffffff
+  r  #ff000080
+sprite gem 3x2
+  kw.
+  .rk
+sprite panel 4x4 slice=1,1,1,2
+  kkkk
+  kwwk
+  kwwk
+  kkkk
+sprite big_gem = gem:scale(3)
+sprite big_panel = panel:scale(2)
+sprite wide_panel = panel:scale(2):size(12x10)
+";
+
+#[test]
+fn scale_enlarges_every_pixel_to_a_block() {
+    let doc = parse(ICONS);
+    let gem = doc.sprite("gem").unwrap();
+    let big = doc.sprite("big_gem").unwrap();
+    assert_eq!((big.width(), big.height()), (9, 6));
+    let (small, image) = (gem.render(), big.render());
+    for y in 0..6 {
+        for x in 0..9 {
+            assert_eq!(image.pixel(x, y), small.pixel(x / 3, y / 3), "{x},{y}");
+            assert_eq!(big.key(x, y), gem.key(x / 3, y / 3));
+        }
+    }
+    assert_eq!(gem.scale(2).unwrap().name(), "gem:scale(2)");
+    // The metadata sizes follow the sprite.
+    let export = doc.export(&spritebox::ExportOptions::default()).unwrap();
+    assert_eq!(export.atlas.region("big_gem").unwrap().width, 9);
+    assert_eq!(export.atlas.region("big_gem").unwrap().height, 6);
+}
+
+#[test]
+fn scale_multiplies_panel_insets() {
+    let doc = parse(ICONS);
+    let panel = doc.sprite("big_panel").unwrap();
+    assert_eq!((panel.width(), panel.height()), (8, 8));
+    let insets = panel.slice().unwrap();
+    assert_eq!(
+        (insets.left, insets.top, insets.right, insets.bottom),
+        (2, 2, 2, 4)
+    );
+    let wide = doc.sprite("wide_panel").unwrap();
+    assert_eq!((wide.width(), wide.height()), (12, 10));
+    assert_eq!(wide.slice(), Some(insets));
+    let json = doc
+        .export(&spritebox::ExportOptions::default())
+        .unwrap()
+        .to_json();
+    assert!(
+        json.contains("\"big_panel\": {\"left\": 2, \"top\": 2, \"right\": 2, \"bottom\": 4}"),
+        "{json}"
+    );
+}
+
+#[test]
+fn scale_rejects_other_factors_and_checks_limits() {
+    for (n, column) in [("1", 24), ("9", 24), ("0", 24), ("x", 24)] {
+        let text = format!("{ICONS}sprite bad = gem:scale({n})\n");
+        let found = errors(&text);
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!((found[0].0, found[0].1), (17, column), "{n}: {found:?}");
+    }
+    let text = format!("{ICONS}sprite bad = gem:scale(2,2)\n");
+    assert_eq!(errors(&text)[0].2, ErrorCode::Syntax);
+    // 3 × 8 = 24 fits 24 pixels a side; 25 does not, and nothing is allocated.
+    let limits = Limits {
+        max_sprite_side: 24,
+        ..Limits::default()
+    };
+    let at_limit = format!("{ICONS}sprite ok = gem:scale(8)\n");
+    assert!(check(&at_limit, &limits).is_empty());
+    let over = format!("{ICONS}sprite bad = gem:scale(8):pad(1)\n");
+    let found = check(&over, &limits);
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].code, ErrorCode::LimitExceeded);
+    let tall = format!("{ICONS}sprite bad = panel:scale(8)\n");
+    let found = check(&tall, &limits);
+    assert_eq!(found[0].code, ErrorCode::LimitExceeded, "{found:?}");
+    let gem = parse(ICONS).sprite("gem").unwrap().clone();
+    assert_eq!(gem.scale(1).unwrap_err().code, ErrorCode::InvalidArgument);
+    assert_eq!(gem.scale(9).unwrap_err().code, ErrorCode::InvalidArgument);
+    assert_eq!(
+        gem.scale_with(8, &limits).unwrap().width(),
+        24,
+        "at the limit"
+    );
+    let narrow = Limits {
+        max_sprite_side: 23,
+        ..Limits::default()
+    };
+    assert_eq!(
+        gem.scale_with(8, &narrow).unwrap_err().code,
+        ErrorCode::LimitExceeded
+    );
+}

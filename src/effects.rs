@@ -1,6 +1,14 @@
 //! Pixel-preserving panel resizing and silhouette shadows.
 use crate::sprite::{EMPTY, Layer};
-use crate::{Error, ErrorCode, Image, Limits, Result, Sprite};
+use crate::{Error, ErrorCode, Image, Insets, Limits, Result, Sprite};
+
+/// The size of a `width` × `height` sprite scaled by `n`.
+pub(crate) fn scaled_size(width: u32, height: u32, n: u32) -> Result<(u32, u32)> {
+    match (width.checked_mul(n), height.checked_mul(n)) {
+        (Some(w), Some(h)) => Ok((w, h)),
+        _ => Err(Error::limit("Scaled sprite size overflow")),
+    }
+}
 
 /// How a panel's edges and centre fill their destination.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -89,6 +97,31 @@ impl Sprite {
                 ))
             },
         ))
+    }
+
+    /// Every pixel enlarged to an `n` × `n` block, with no filtering (`:scale(n)`), for
+    /// `n` from 2 to 8, within default limits. Panel insets are multiplied by `n`.
+    pub fn scale(&self, n: u32) -> Result<Sprite> {
+        self.scale_with(n, &Limits::default())
+    }
+
+    /// [`Sprite::scale`] within explicit image, sprite and layer limits, checked
+    /// before the result is allocated.
+    pub fn scale_with(&self, n: u32, limits: &Limits) -> Result<Sprite> {
+        if !(2..=8).contains(&n) {
+            return Err(Error::invalid(format!("Scale must be 2..=8, not {n}")));
+        }
+        let (width, height) = scaled_size(self.width, self.height, n)?;
+        self.effect_size(width, height, self.layers.len(), limits)?;
+        let slice = self.slice.map(|i| Insets {
+            left: i.left * n,
+            top: i.top * n,
+            right: i.right * n,
+            bottom: i.bottom * n,
+        });
+        Ok(self.derive(&format!("scale({n})"), width, height, slice, |x, y| {
+            Some((x / n, y / n))
+        }))
     }
 
     /// Draw an offset silhouette beneath this sprite. The canvas grows, and panel

@@ -338,6 +338,7 @@ same chains name the frames of animations and the layers of sprites.
 | `rot90`, `rot180`, `rot270` | Rotated clockwise; a quarter turn swaps width and height |
 | `offset(dx,dy)` | Pixels moved right and down (negative: left and up) within the same size; pixels moved out are lost |
 | `pad(n)` | `n` empty pixels added on every side |
+| `scale(n)` | Every pixel enlarged to an `n` × `n` block, `n` from 2 to 8, with no filtering; slice insets are multiplied by `n` |
 | `swap(PALETTE)` | The same keys colored by another palette, which must have every key the sprite uses |
 | `outline(KEY)` | A one-pixel outline of `KEY` on the transparent pixels that share an edge with visible ones, as a new bottom layer; pad first if the shape touches the edges |
 | `size(WxH[,tile])` | Resize a panel while retaining its corners and slice insets; stretch by default |
@@ -355,8 +356,9 @@ circle.
 Shadows use ordinary palette colors, including alpha, and the same integer
 source-over as other layers. Long-shadow overlaps are drawn once, so translucent
 shadows do not get darker at overlapping steps. Rust has `Sprite::shadow` and
-`shadow_with`, with `Shadow::Hard` or `Shadow::Long`. Growing modifiers enforce
-image, sprite and layer limits before allocating their result.
+`shadow_with`, with `Shadow::Hard` or `Shadow::Long`, and `Sprite::scale` and
+`scale_with`. Growing modifiers enforce image, sprite and layer limits before
+allocating their result.
 
 ### Animations
 
