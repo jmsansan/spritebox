@@ -41,25 +41,58 @@ impl Font {
         options: &TextOptions,
         limits: &Limits,
     ) -> Result<Sprite> {
+        self.sprite_runs_with(&[(key, text)], palette, options, limits)
+    }
+
+    /// Draw text in several colors: each run is a palette key and the text drawn in
+    /// it, in order. Glyph positions, kerning, wrapping and alignment are those of
+    /// the same text in one color.
+    pub fn sprite_runs(
+        &self,
+        runs: &[(char, &str)],
+        palette: &Palette,
+        options: &TextOptions,
+    ) -> Result<Sprite> {
+        self.sprite_runs_with(runs, palette, options, &Limits::default())
+    }
+
+    /// [`Font::sprite_runs`] with explicit limits.
+    pub fn sprite_runs_with(
+        &self,
+        runs: &[(char, &str)],
+        palette: &Palette,
+        options: &TextOptions,
+        limits: &Limits,
+    ) -> Result<Sprite> {
         if limits.max_layers == 0 {
             return Err(Error::limit("Text sprites need one layer"));
         }
-        if text.len() > limits.max_text_bytes {
+        let bytes = runs
+            .iter()
+            .try_fold(0usize, |sum, (_, text)| sum.checked_add(text.len()));
+        if bytes.is_none_or(|b| b > limits.max_text_bytes) {
             return Err(Error::limit("Text exceeds the input byte limit"));
         }
-        if palette.color(key).is_none() {
-            return Err(Error::new(
-                ErrorCode::UnknownName,
-                format!("Unknown text color `{key}`"),
-            ));
+        for &(key, _) in runs {
+            if palette.color(key).is_none() {
+                return Err(Error::new(
+                    ErrorCode::UnknownName,
+                    format!("Unknown text color `{key}`"),
+                ));
+            }
         }
+        // Each character with its key.
+        let text: Vec<(char, char)> = runs
+            .iter()
+            .flat_map(|&(key, text)| text.chars().map(move |c| (c, key)))
+            .collect();
         let line_height = options.line_height.unwrap_or(self.line_height);
         if line_height == 0 || line_height > limits.max_sprite_side || options.width == Some(0) {
             return Err(Error::invalid(
                 "Text width and line height must be positive and within the sprite limits",
             ));
         }
-        for c in text.chars().filter(|c| *c != '\n') {
+        for c in text.iter().map(|&(c, _)| c).filter(|c| *c != '\n') {
             if self.glyph(c).is_none() {
                 return Err(Error::new(
                     ErrorCode::UnknownName,
@@ -67,19 +100,18 @@ impl Font {
                 ));
             }
         }
-        let mut lines: Vec<Vec<char>> = Vec::new();
-        for raw in text.split('\n') {
-            let chars: Vec<char> = raw.chars().collect();
+        let mut lines: Vec<Vec<(char, char)>> = Vec::new();
+        for chars in text.split(|&(c, _)| c == '\n') {
             let mut start = 0;
             loop {
                 let rest = &chars[start..];
                 if let Some(width) = options.width {
                     let fit = self.fitting_prefix(rest, width as u64);
                     if fit < rest.len() {
-                        let cut = if rest.get(fit) == Some(&' ') {
+                        let cut = if rest.get(fit).is_some_and(|&(c, _)| c == ' ') {
                             Some(fit)
                         } else {
-                            rest[..fit].iter().rposition(|c| *c == ' ')
+                            rest[..fit].iter().rposition(|&(c, _)| c == ' ')
                         };
                         let Some(cut) = cut else {
                             return Err(Error::invalid(format!(
@@ -87,7 +119,7 @@ impl Font {
                             )));
                         };
                         let mut end = cut;
-                        while end > 0 && rest[end - 1] == ' ' {
+                        while end > 0 && rest[end - 1].0 == ' ' {
                             end -= 1;
                         }
                         lines.push(rest[..end].to_vec());
@@ -97,7 +129,7 @@ impl Font {
                             ));
                         }
                         start += cut + 1;
-                        while start < chars.len() && chars[start] == ' ' {
+                        while start < chars.len() && chars[start].0 == ' ' {
                             start += 1;
                         }
                         continue;
@@ -131,7 +163,7 @@ impl Font {
             };
             let mut pen = offset as i64;
             let mut previous = None;
-            for &c in line {
+            for &(c, key) in line {
                 let glyph = self.glyph(c).unwrap();
                 pen += previous.map_or(0, |p| self.kern(p, c)) as i64;
                 for y in 0..self.height {
@@ -162,11 +194,11 @@ impl Font {
         })
     }
 
-    fn layout_width(&self, chars: &[char]) -> u64 {
+    fn layout_width(&self, chars: &[(char, char)]) -> u64 {
         let mut pen = 0i64;
         let mut right = 0i64;
         let mut previous = None;
-        for &c in chars {
+        for &(c, _) in chars {
             if let Some(glyph) = self.glyph(c) {
                 pen += previous.map_or(0, |p| self.kern(p, c)) as i64;
                 right = right.max(pen + glyph.width as i64);
@@ -178,11 +210,11 @@ impl Font {
         right.max(0) as u64
     }
 
-    fn fitting_prefix(&self, chars: &[char], width: u64) -> usize {
+    fn fitting_prefix(&self, chars: &[(char, char)], width: u64) -> usize {
         let mut pen = 0i64;
         let mut right = 0i64;
         let mut previous = None;
-        for (i, &c) in chars.iter().enumerate() {
+        for (i, &(c, _)) in chars.iter().enumerate() {
             let glyph = self.glyph(c).unwrap();
             pen += previous.map_or(0, |p| self.kern(p, c)) as i64;
             right = right.max(pen + glyph.width as i64);

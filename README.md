@@ -639,6 +639,19 @@ spaces are trimmed, and indented blank lines add a line. A whole word such as
 syntax. Missing glyphs are errors at their source character, rather than fallback
 glyphs. Rust has `Font::sprite`/`sprite_with` and `TextOptions` with `Align`.
 
+**Colors inside a text.** `{KEY}` switches to palette key `KEY` for the characters
+after it, across line breaks, and `{}` returns to `color=`:
+
+```text
+text loot font=hud palette=ui color=g width=120
+  {b}+12 %{} damage
+```
+
+Kerning, wrapping and alignment are those of the same text in one color: only the
+keys of the glyphs change. A key the palette lacks is an error at the key. Any
+other `{` is an error; write the whole word `U+007B` for a literal `{`. Rust has
+`Font::sprite_runs`/`sprite_runs_with`, which take `(key, text)` runs.
+
 Fonts accept optional `kern AV -1` entries, or escaped pairs such as
 `kern U+0041,U+0056 -1`. Both glyphs must exist. An adjustment cannot move the pen
 before its preceding glyph. `Font::kern` returns the adjustment in pixels;

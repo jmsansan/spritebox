@@ -839,3 +839,110 @@ background mockup 256x256
     );
     assert_eq!(missing.err().unwrap().code, ErrorCode::UnknownName);
 }
+
+// --- Several colors in one text (#61) -------------------------------------------
+
+const HUD: &str = "\
+palette p
+  . transparent
+  g #808080
+  b #4080ff
+  y #ffd000
+font hud height=3 baseline=2 line_height=4 spacing=1 space=1
+  glyph A
+    ##
+    #.
+    ##
+  glyph V
+    #.
+    #.
+    .#
+  glyph U+007B
+    .#
+    #.
+    .#
+  kern AV -1
+";
+
+/// The keys of a sprite, row by row, with ` ` where nothing is drawn.
+fn key_rows(doc: &Document, name: &str) -> Vec<String> {
+    let s = doc.sprite(name).unwrap();
+    (0..s.height())
+        .map(|y| (0..s.width()).map(|x| s.key(x, y).unwrap_or(' ')).collect())
+        .collect()
+}
+
+#[test]
+fn colors_change_inside_a_text_without_moving_glyphs() {
+    let doc = parse(&format!(
+        "{HUD}\
+text plain font=hud color=g width=9 align=center
+  AV AVA VA
+text colored font=hud color=g width=9 align=center
+  A{{b}}V A{{y}}VA V{{}}A
+"
+    ));
+    let plain = key_rows(&doc, "plain");
+    let colored = key_rows(&doc, "colored");
+    assert_eq!(plain.len(), colored.len());
+    // The same pixels are drawn, so the glyphs are where they are in one color.
+    for (p, c) in plain.iter().zip(&colored) {
+        let shape = |row: &str| row.chars().map(|k| k != ' ').collect::<Vec<_>>();
+        assert_eq!(shape(p), shape(c), "{plain:?}\n{colored:?}");
+    }
+    // "AV AVA" wraps after the first word at width 9: the colors cross the break.
+    assert_eq!(
+        colored,
+        [
+            "  ggb    ", "  g b    ", "  gg b   ", "         ", //
+            "bby  yy  ", "b y  y   ", "bb y yy  ", "         ", //
+            " y  gg   ", " y  g    ", "  y gg   ",
+        ]
+    );
+}
+
+#[test]
+fn every_glyph_has_its_color_across_lines() {
+    let doc = parse(&format!(
+        "{HUD}text t font=hud color=g\n  A{{b}}A\n  A{{}}A\ntext u font=hud color=y\n  U+007B {{g}}A\n"
+    ));
+    assert_eq!(
+        key_rows(&doc, "t"),
+        ["gg bb ", "g  b  ", "gg bb ", "      ", "bb gg ", "b  g  ", "bb gg "]
+    );
+    // U+007B writes a literal `{`, in the current color.
+    assert_eq!(key_rows(&doc, "u"), [" y  gg ", "y   g  ", " y  gg "]);
+    let font = doc.font("hud").unwrap();
+    let palette = doc.palette("p").unwrap();
+    let runs = font
+        .sprite_runs(&[('g', "A"), ('b', "A\nA"), ('g', "A")], palette, &Default::default())
+        .unwrap();
+    let t = doc.sprite("t").unwrap();
+    for y in 0..t.height() {
+        for x in 0..t.width() {
+            assert_eq!(runs.key(x, y), t.key(x, y));
+        }
+    }
+    assert_eq!(
+        font.sprite_runs(&[('z', "A")], palette, &Default::default())
+            .unwrap_err()
+            .code,
+        ErrorCode::UnknownName
+    );
+}
+
+#[test]
+fn color_switch_errors_are_positioned() {
+    let cases = [
+        ("  AV{z}A\n", (21, 6), ErrorCode::UnknownName, "Unknown text color `z`"),
+        ("  A{zz}A\n", (21, 4), ErrorCode::Syntax, "U+007B"),
+        ("  A{\n", (21, 4), ErrorCode::Syntax, "U+007B"),
+        ("  A{ }A\n", (21, 4), ErrorCode::Syntax, "U+007B"),
+    ];
+    for (body, at, code, message) in cases {
+        let found = errors(&format!("{HUD}text t font=hud color=g\n{body}"));
+        assert_eq!(found.len(), 1, "{body}{found:?}");
+        assert_eq!(((found[0].0, found[0].1), found[0].2), (at, code), "{body}");
+        assert!(found[0].3.contains(message), "{body}{}", found[0].3);
+    }
+}
